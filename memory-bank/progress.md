@@ -50,4 +50,22 @@
   - 简要写明后台启动方式（`mvn spring-boot:run`）与前端启动方式（`npm install` + `npm run dev`）
   - 强调开发需遵循 `tech_stack_recommendation.md` 与 `implement-plan.md`
 
-> 当前为止，仅完成实施计划中的「步骤 1.1：创建前后端项目骨架」，尚未开始多环境、数据库、日志等配置（步骤 1.2 及后续阶段）。
+> 截至 2026-01-28，已完成实施计划中的「步骤 1.1：创建前后端项目骨架」与「步骤 1.2：配置开发环境」，后续阶段尚未开始。
+
+## 2026-01-28 阶段一 · 步骤 1.2：配置开发环境
+
+### 后端（backend）
+
+- 在 [`backend/src/main/resources/application.yml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/resources/application.yml) 中启用 Spring Profile，并新增 MyBatis-Plus 全局配置
+  - `spring.profiles.active=dev`
+  - 统一配置 `mapper-locations`、`type-aliases-package`、驼峰映射和逻辑删除规则
+- 新增多环境配置文件：
+  - [`backend/src/main/resources/application-dev.yml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/resources/application-dev.yml)
+  - [`backend/src/main/resources/application-test.yml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/resources/application-test.yml)
+  - [`backend/src/main/resources/application-prod.yml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/resources/application-prod.yml)
+- 在各环境配置中完成：
+  - 使用环境变量驱动的 MySQL 数据源配置（`DB_HOST`、`DB_PORT`、`DB_USERNAME`、`DB_PASSWORD`）
+  - 为 dev/test/prod 分别配置不同的日志级别与输出文件路径
+  - 所有环境统一使用 `server.port=8080`，供前端和运维统一约定
+
+> 已具备通过切换 `spring.profiles.active` 来区分 dev/test/prod 环境的能力，后续实现数据库表结构和业务模块时可直接复用当前配置。

@@ -1,7 +1,20 @@
 spring:
   application:
     name: travel-admin-backend
+  profiles:
+    active: dev
 
 server:
   port: 8080
 
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.travel.admin.entity
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
