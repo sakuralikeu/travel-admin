@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,6 +34,7 @@ public class EmployeeController {
     @PostMapping
     @Operation(summary = "创建员工")
     @LogOperation(module = "EMPLOYEE", name = "创建员工", type = OperationType.CREATE)
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<EmployeeResponse> createEmployee(@Valid @RequestBody EmployeeCreateRequest request) {
         EmployeeResponse response = employeeService.createEmployee(request);
         return Result.success(response);
@@ -41,6 +43,7 @@ public class EmployeeController {
     @PutMapping("/{id}")
     @Operation(summary = "更新员工信息")
     @LogOperation(module = "EMPLOYEE", name = "更新员工信息", type = OperationType.UPDATE)
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<EmployeeResponse> updateEmployee(@PathVariable Long id,
                                                    @Valid @RequestBody EmployeeUpdateRequest request) {
         EmployeeResponse response = employeeService.updateEmployee(id, request);
@@ -50,6 +53,7 @@ public class EmployeeController {
     @DeleteMapping("/{id}")
     @Operation(summary = "删除员工")
     @LogOperation(module = "EMPLOYEE", name = "删除员工", type = OperationType.DELETE)
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> deleteEmployee(@PathVariable Long id) {
         employeeService.deleteEmployee(id);
         return Result.success();
@@ -58,6 +62,7 @@ public class EmployeeController {
     @GetMapping("/{id}")
     @Operation(summary = "根据ID查询员工详情")
     @LogOperation(module = "EMPLOYEE", name = "查询员工详情", type = OperationType.QUERY)
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','MANAGER')")
     public Result<EmployeeResponse> getEmployeeById(@PathVariable Long id) {
         EmployeeResponse response = employeeService.getEmployeeById(id);
         return Result.success(response);
@@ -66,6 +71,7 @@ public class EmployeeController {
     @GetMapping
     @Operation(summary = "分页查询员工列表")
     @LogOperation(module = "EMPLOYEE", name = "分页查询员工列表", type = OperationType.QUERY)
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','MANAGER')")
     public Result<PageResult<EmployeeResponse>> getEmployeePage(@Valid EmployeeQueryRequest request) {
         PageResult<EmployeeResponse> pageResult = employeeService.getEmployeePage(request);
         return Result.success(pageResult);

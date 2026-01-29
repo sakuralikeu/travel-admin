@@ -31,6 +31,9 @@ import com.travel.admin.service.CustomerService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -96,9 +99,23 @@ public class CustomerServiceImpl implements CustomerService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteCustomer(Long id) {
+        Customer customer = customerMapper.selectById(id);
+        if (customer == null) {
+            throw new BusinessException("客户不存在");
+        }
+        EmployeeRole role = currentUserRole();
+        if (customer.getLevel() == CustomerLevel.VIP) {
+            if (role != EmployeeRole.SUPER_ADMIN && role != EmployeeRole.MANAGER) {
+                throw new BusinessException("仅经理或超级管理员可删除VIP客户");
+            }
+        } else {
+            if (!isSupervisorOrAbove(role)) {
+                throw new BusinessException("仅主管及以上角色可删除客户");
+            }
+        }
         int affected = customerMapper.deleteById(id);
         if (affected == 0) {
-            throw new BusinessException("客户不存在");
+            throw new BusinessException("删除客户失败");
         }
         log.info("删除客户成功, id={}", id);
     }
@@ -140,7 +157,9 @@ public class CustomerServiceImpl implements CustomerService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void assignCustomer(Long customerId, CustomerAssignRequest request) {
-        requireSupervisorOrAbove(request.getOperatorRole());
+        EmployeeRole role = currentUserRole();
+        requireSupervisorOrAbove(role);
+        Long operatorId = currentUserId();
         Customer customer = customerMapper.selectById(customerId);
         if (customer == null) {
             throw new BusinessException("客户不存在");
@@ -158,7 +177,7 @@ public class CustomerServiceImpl implements CustomerService {
             throw new BusinessException("分配客户失败");
         }
         CustomerTransferRecord record = buildTransferRecord(customerId, originalAssignee, request.getTargetEmployeeId(),
-                request.getOperatorId(), CustomerTransferType.ASSIGN, request.getReason());
+                operatorId, CustomerTransferType.ASSIGN, request.getReason());
         customerTransferRecordMapper.insert(record);
         log.info("分配客户成功, customerId={}, from={}, to={}", customerId, originalAssignee, request.getTargetEmployeeId());
     }
@@ -182,6 +201,8 @@ public class CustomerServiceImpl implements CustomerService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void claimFromPublicPool(PublicPoolClaimRequest request) {
+        EmployeeRole operatorRole = currentUserRole();
+        Long operatorId = currentUserId();
         Customer customer = customerMapper.selectById(request.getCustomerId());
         if (customer == null) {
             throw new BusinessException("客户不存在");
@@ -189,31 +210,33 @@ public class CustomerServiceImpl implements CustomerService {
         if (customer.getStatus() != CustomerStatus.PUBLIC_POOL || customer.getAssignedTo() != null) {
             throw new BusinessException("客户不在公海池中");
         }
-        if (customer.getLevel() == CustomerLevel.VIP && !isSupervisorOrAbove(request.getOperatorRole())) {
+        if (customer.getLevel() == CustomerLevel.VIP && !isSupervisorOrAbove(operatorRole)) {
             throw new BusinessException("仅主管及以上角色可领取公海中的VIP客户");
         }
-        int todayClaimCount = countTodayClaims(request.getOperatorId());
-        if (todayClaimCount >= DAILY_PUBLIC_POOL_CLAIM_LIMIT && !isSupervisorOrAbove(request.getOperatorRole())) {
+        int todayClaimCount = countTodayClaims(operatorId);
+        if (todayClaimCount >= DAILY_PUBLIC_POOL_CLAIM_LIMIT && !isSupervisorOrAbove(operatorRole)) {
             throw new BusinessException("已超出每日领取上限, 需主管审批后处理");
         }
-        customer.setAssignedTo(request.getOperatorId());
+        customer.setAssignedTo(operatorId);
         customer.setStatus(CustomerStatus.FOLLOWING);
         int updated = customerMapper.updateById(customer);
         if (updated != 1) {
             throw new BusinessException("领取公海客户失败");
         }
-        CustomerTransferRecord record = buildTransferRecord(customer.getId(), null, request.getOperatorId(),
-                request.getOperatorId(), CustomerTransferType.CLAIM_FROM_POOL, null);
+        CustomerTransferRecord record = buildTransferRecord(customer.getId(), null, operatorId,
+                operatorId, CustomerTransferType.CLAIM_FROM_POOL, null);
         customerTransferRecordMapper.insert(record);
-        log.info("领取公海客户成功, customerId={}, operatorId={}", customer.getId(), request.getOperatorId());
+        log.info("领取公海客户成功, customerId={}, operatorId={}", customer.getId(), operatorId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void handleEmployeeResign(EmployeeResignHandleRequest request) {
-        if (!isSupervisorOrAbove(request.getOperatorRole())) {
+        EmployeeRole operatorRole = currentUserRole();
+        if (!isSupervisorOrAbove(operatorRole)) {
             throw new BusinessException("仅主管及以上角色可处理离职员工客户");
         }
+        Long operatorId = currentUserId();
         boolean moveToPublicPool = Boolean.TRUE.equals(request.getMoveToPublicPool());
         if (!moveToPublicPool && request.getTargetEmployeeId() == null) {
             throw new BusinessException("未指定客户处理方式");
@@ -228,7 +251,7 @@ public class CustomerServiceImpl implements CustomerService {
             Long fromEmployeeId = customer.getAssignedTo();
             Long toEmployeeId = moveToPublicPool ? null : request.getTargetEmployeeId();
             if (moveToPublicPool) {
-                moveCustomerToPublicPool(customer, request.getOperatorId(), CustomerTransferType.EMPLOYEE_RESIGN_TO_POOL,
+                moveCustomerToPublicPool(customer, operatorId, CustomerTransferType.EMPLOYEE_RESIGN_TO_POOL,
                         request.getReason());
             } else {
                 customer.setAssignedTo(request.getTargetEmployeeId());
@@ -238,7 +261,7 @@ public class CustomerServiceImpl implements CustomerService {
                     throw new BusinessException("批量转移客户失败");
                 }
                 CustomerTransferRecord record = buildTransferRecord(customer.getId(), fromEmployeeId, toEmployeeId,
-                        request.getOperatorId(), CustomerTransferType.EMPLOYEE_RESIGN_TRANSFER, request.getReason());
+                        operatorId, CustomerTransferType.EMPLOYEE_RESIGN_TRANSFER, request.getReason());
                 customerTransferRecordMapper.insert(record);
             }
         }
@@ -263,6 +286,32 @@ public class CustomerServiceImpl implements CustomerService {
             moveCustomerToPublicPool(customer, null, CustomerTransferType.AUTO_RECYCLE_TO_POOL, null);
         }
         log.info("自动回收公海客户完成, count={}", customers.size());
+    }
+
+    private Long currentUserId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getPrincipal() == null) {
+            throw new BusinessException("未登录");
+        }
+        Object principal = authentication.getPrincipal();
+        if (principal instanceof Long) {
+            return (Long) principal;
+        }
+        throw new BusinessException("无法获取当前登录用户ID");
+    }
+
+    private EmployeeRole currentUserRole() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null) {
+            throw new BusinessException("未登录");
+        }
+        return authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(authority -> authority != null && authority.startsWith("ROLE_"))
+                .findFirst()
+                .map(authority -> authority.substring("ROLE_".length()))
+                .map(EmployeeRole::valueOf)
+                .orElseThrow(() -> new BusinessException("无法获取当前用户角色"));
     }
 
     private LambdaQueryWrapper<Customer> buildCustomerQueryWrapper(CustomerQueryRequest request) {
@@ -365,4 +414,3 @@ public class CustomerServiceImpl implements CustomerService {
         customerTransferRecordMapper.insert(record);
     }
 }
-

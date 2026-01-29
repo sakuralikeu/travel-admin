@@ -1,30 +1,6 @@
 <template>
-  <a-layout style="min-height: 100vh">
-    <a-layout-header>
-      <div class="header-inner">
-        <div class="logo">员工客户管理系统</div>
-        <a-menu
-          theme="dark"
-          mode="horizontal"
-          :selected-keys="['employees']"
-        >
-          <a-menu-item key="home">
-            <RouterLink to="/">首页</RouterLink>
-          </a-menu-item>
-          <a-menu-item key="employees">
-            <RouterLink to="/employees">员工管理</RouterLink>
-          </a-menu-item>
-          <a-menu-item key="profile">
-            <RouterLink to="/profile">个人中心</RouterLink>
-          </a-menu-item>
-          <a-menu-item key="settings">
-            <RouterLink to="/settings">设置</RouterLink>
-          </a-menu-item>
-        </a-menu>
-      </div>
-    </a-layout-header>
-    <a-layout-content style="padding: 24px">
-      <a-card title="员工管理">
+  <MainLayout selected-key="employees">
+    <a-card title="员工管理">
         <div class="toolbar">
           <a-input-search
             v-model:value="keyword"
@@ -33,7 +9,11 @@
             style="max-width: 320px"
             @search="handleSearch"
           />
-          <a-button type="primary" @click="openCreateModal">
+          <a-button
+            v-if="canManageEmployees"
+            type="primary"
+            @click="openCreateModal"
+          >
             新增员工
           </a-button>
         </div>
@@ -60,7 +40,7 @@
             </template>
           </a-table-column>
           <a-table-column title="入职日期" data-index="hireDate" key="hireDate" />
-          <a-table-column key="action" title="操作">
+          <a-table-column v-if="canManageEmployees" key="action" title="操作">
             <template #default="{ record }">
               <a-button type="link" @click="openEditModal(record)">
                 编辑
@@ -152,20 +132,20 @@
           </a-form-item>
         </a-form>
       </a-modal>
-    </a-layout-content>
-  </a-layout>
+  </MainLayout>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
-import { RouterLink } from "vue-router";
+import { computed, onMounted, reactive, ref } from "vue";
 import { message } from "ant-design-vue";
+import MainLayout from "../components/MainLayout.vue";
 import type { Employee, EmployeeFormValues } from "../types";
 import {
   createEmployee,
   deleteEmployee,
   fetchEmployeePage,
-  updateEmployee
+  updateEmployee,
+  getCurrentUser
 } from "../services";
 
 const employees = ref<Employee[]>([]);
@@ -192,6 +172,15 @@ const formState = reactive<EmployeeFormValues>({
   hireDate: null,
   resignDate: null,
   password: ""
+});
+
+const currentUser = getCurrentUser();
+
+const canManageEmployees = computed(() => {
+  if (!currentUser) {
+    return false;
+  }
+  return currentUser.role === "SUPER_ADMIN";
 });
 
 const employeeRoleOptions = [
@@ -345,17 +334,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.header-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.logo {
-  color: #fff;
-  font-size: 18px;
-}
-
 .toolbar {
   display: flex;
   justify-content: space-between;

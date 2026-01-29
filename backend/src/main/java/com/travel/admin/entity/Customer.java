@@ -31,6 +31,12 @@ public class Customer {
 
     private CustomerStatus status;
 
+    private String preferredDestination;
+
+    private String preferredBudget;
+
+    private String preferredTravelTime;
+
     private Long assignedTo;
 
     private String source;
@@ -54,4 +60,3 @@ public class Customer {
     @TableLogic
     private Integer deleted;
 }
-

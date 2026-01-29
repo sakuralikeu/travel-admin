@@ -25,6 +25,12 @@ public class CustomerUpdateRequest {
     @Email(message = "邮箱格式不正确")
     private String email;
 
+    private String preferredDestination;
+
+    private String preferredBudget;
+
+    private String preferredTravelTime;
+
     @NotNull(message = "客户等级不能为空")
     private CustomerLevel level;
 
@@ -39,4 +45,3 @@ public class CustomerUpdateRequest {
 
     private String remark;
 }
-

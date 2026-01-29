@@ -5,25 +5,47 @@ import type {
   EmployeeFormValues,
   EmployeeQueryParams,
   LoginRequest,
-  LoginResponse
+  LoginResponse,
+  Customer,
+  CustomerFormValues,
+  CustomerQueryParams
 } from "../types";
 
 const EMPLOYEE_BASE_URL = "/api/employees";
+const CUSTOMER_BASE_URL = "/api/customers";
 const AUTH_LOGIN_URL = "/api/auth/login";
 const AUTH_ME_URL = "/api/auth/me";
 
 const TOKEN_STORAGE_KEY = "travel_admin_token";
+const USER_STORAGE_KEY = "travel_admin_user";
 
 export function getAccessToken(): string | null {
   return localStorage.getItem(TOKEN_STORAGE_KEY);
 }
 
-export function setAccessToken(token: string) {
+function setAccessToken(token: string) {
   localStorage.setItem(TOKEN_STORAGE_KEY, token);
+}
+
+function setCurrentUser(user: LoginResponse) {
+  localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+}
+
+export function getCurrentUser(): LoginResponse | null {
+  const raw = localStorage.getItem(USER_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as LoginResponse;
+  } catch {
+    return null;
+  }
 }
 
 export function clearAccessToken() {
   localStorage.removeItem(TOKEN_STORAGE_KEY);
+  localStorage.removeItem(USER_STORAGE_KEY);
 }
 
 async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
@@ -59,6 +81,7 @@ export async function login(payload: LoginRequest): Promise<LoginResponse> {
     body: JSON.stringify(payload)
   });
   setAccessToken(data.token);
+  setCurrentUser(data);
   return data;
 }
 
@@ -155,5 +178,91 @@ export async function deleteEmployee(id: number): Promise<void> {
 export async function fetchCurrentEmployee(): Promise<Employee> {
   return requestJson<Employee>(AUTH_ME_URL, {
     method: "GET"
+  });
+}
+
+export async function fetchCustomerPage(
+  params: CustomerQueryParams
+): Promise<PageResult<Customer>> {
+  const searchParams = new URLSearchParams();
+  if (params.keyword) {
+    searchParams.append("keyword", params.keyword);
+  }
+  if (params.level) {
+    searchParams.append("level", params.level);
+  }
+  if (params.status) {
+    searchParams.append("status", params.status);
+  }
+  if (params.assignedTo != null) {
+    searchParams.append("assignedTo", String(params.assignedTo));
+  }
+  if (params.pageNum != null) {
+    searchParams.append("pageNum", String(params.pageNum));
+  }
+  if (params.pageSize != null) {
+    searchParams.append("pageSize", String(params.pageSize));
+  }
+  const queryString = searchParams.toString();
+  const url = queryString ? `${CUSTOMER_BASE_URL}?${queryString}` : CUSTOMER_BASE_URL;
+  return requestJson<PageResult<Customer>>(url, {
+    method: "GET"
+  });
+}
+
+export async function createCustomer(
+  payload: CustomerFormValues
+): Promise<Customer> {
+  const body = {
+    name: payload.name,
+    phone: payload.phone,
+    wechat: payload.wechat ?? null,
+    email: payload.email ?? null,
+    preferredDestination: payload.preferredDestination ?? null,
+    preferredBudget: payload.preferredBudget ?? null,
+    preferredTravelTime: payload.preferredTravelTime ?? null,
+    level: payload.level,
+    status: payload.status,
+    assignedTo: payload.assignedTo,
+    remark: payload.remark ?? null
+  };
+  return requestJson<Customer>(CUSTOMER_BASE_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function updateCustomer(
+  id: number,
+  payload: CustomerFormValues
+): Promise<Customer> {
+  const body = {
+    name: payload.name,
+    phone: payload.phone,
+    wechat: payload.wechat ?? null,
+    email: payload.email ?? null,
+    preferredDestination: payload.preferredDestination ?? null,
+    preferredBudget: payload.preferredBudget ?? null,
+    preferredTravelTime: payload.preferredTravelTime ?? null,
+    level: payload.level,
+    status: payload.status,
+    assignedTo: payload.assignedTo,
+    remark: payload.remark ?? null
+  };
+  return requestJson<Customer>(`${CUSTOMER_BASE_URL}/${id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function deleteCustomer(id: number): Promise<void> {
+  await requestJson<void>(`${CUSTOMER_BASE_URL}/${id}`, {
+    method: "DELETE"
   });
 }

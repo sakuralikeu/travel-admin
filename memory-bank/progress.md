@@ -257,7 +257,7 @@
     - 统一增加 `jwt.secret` 与 `jwt.expiration` 字段，分别控制签名密钥与令牌有效期
   - 在 [`backend/pom.xml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/pom.xml) 中引入 `io.jsonwebtoken:jjwt-api/jjwt-impl/jjwt-jackson` 依赖，用于 JWT 生成与解析
 
-> 验证结果：在 `backend` 目录下执行 `mvn -q -DskipTests compile` 编译通过，说明 Spring Security 与 JWT 相关配置类、DTO 与控制器均能正常编译。当前后端已具备基于用户名密码的登录接口以及对受保护接口的令牌校验能力，但尚未启用接口级角色权限控制（对应实施计划步骤 4.2，将在后续迭代中完成）。
+> 验证结果：在 `backend` 目录下执行 `mvn -q -DskipTests compile` 编译通过，说明 Spring Security 与 JWT 相关配置类、DTO 与控制器均能正常编译。当前后端已具备基于用户名密码的登录接口以及对受保护接口的令牌校验能力，为后续角色权限控制与细粒度授权打下基础。
 
 ### 前端（frontend）
 
@@ -290,4 +290,157 @@
       - 若无令牌，则重定向到 `/login`，并附带 `redirect` 查询参数指向原目标路径
       - 若存在令牌，则允许正常进入目标页面
 
-> 验证结果：前端在原有员工列表页面的基础上新增了登录页与基础登录态控制逻辑。登录成功后可正常访问 `/employees` 并拉取员工列表数据；在未登录状态直接访问 `/employees` 会被路由守卫重定向到 `/login`。当前前端仅基于 JWT 是否存在做登录态校验，尚未按角色区分菜单与按钮权限，这部分逻辑将配合实施计划步骤 4.2 在后续迭代中补充。
+> 验证结果：前端在原有员工列表页面的基础上新增了登录页与基础登录态控制逻辑。登录成功后可正常访问 `/employees` 并拉取员工列表数据；在未登录状态直接访问 `/employees` 会被路由守卫重定向到 `/login`。当前阶段侧重于登录与令牌管理，角色维度的菜单与按钮权限控制将在同日完成的实施计划步骤 4.2 中补充。
+
+## 2026-01-29 阶段四 · 步骤 4.2：实现角色权限控制
+
+### 后端（backend）
+
+- 在 Spring Security 配置中启用方法级权限控制：
+  - 更新 [`SecurityConfig`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/config/SecurityConfig.java)，增加 `@EnableMethodSecurity` 注解
+  - 保持原有基于 JWT 的无状态认证配置不变，在此基础上允许在控制器与服务层使用 `@PreAuthorize` 声明角色访问规则
+- 为核心控制器补充接口级角色权限：
+  - 在 [`EmployeeController`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/controller/EmployeeController.java) 中：
+    - 为创建、更新、删除员工接口分别增加 `@PreAuthorize("hasRole('SUPER_ADMIN')")`，仅超级管理员可执行员工增删改
+    - 为按 ID 查询与分页查询接口增加 `@PreAuthorize("hasAnyRole('SUPER_ADMIN','MANAGER')")`，经理可以查看所有员工数据但不能修改
+  - 在 [`CustomerController`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/controller/CustomerController.java) 中：
+    - 对客户删除接口使用 `@PreAuthorize("hasAnyRole('SUPERVISOR','MANAGER','SUPER_ADMIN')")`，禁止普通员工直接删除客户
+    - 对客户分配/转移、离职员工客户处理、公海自动回收等关键操作按“主管及以上”“经理及以上”分别限定可访问角色
+    - 对客户详情、客户列表、公海列表与流转记录查询接口统一限定为已登录员工角色访问，避免匿名或无角色用户调用
+  - 在 [`OperationLogController`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/controller/OperationLogController.java) 中：
+    - 为操作日志分页查询接口增加 `@PreAuthorize("hasAnyRole('SUPERVISOR','MANAGER','SUPER_ADMIN')")`，仅主管及以上角色可审计系统操作日志
+- 调整客户服务层实现，避免前端伪造操作者身份：
+  - 在 [`CustomerServiceImpl`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/impl/CustomerServiceImpl.java) 中新增辅助方法：
+    - `currentUserId()`：从 `SecurityContextHolder` 中获取当前登录员工 ID
+    - `currentUserRole()`：从 `SecurityContextHolder` 中解析当前登录员工的 `EmployeeRole`
+  - 删除对请求体中 `operatorId`、`operatorRole` 字段的信任，将以下业务逻辑全部改为基于当前登录用户：
+    - 客户分配/转移：在 `assignCustomer` 中调用 `currentUserRole()` 与 `currentUserId()`，仅允许 `SUPERVISOR` 及以上角色执行分配操作，并将真实操作者 ID 写入客户流转记录
+    - 公海领取：在 `claimFromPublicPool` 中根据当前登录角色判断是否允许领取 VIP 客户，按当前登录员工 ID 统计每日领取次数并控制领取上限
+    - 离职员工客户处理：在 `handleEmployeeResign` 中要求当前角色为主管及以上，将批量转移或转入公海的操作者写入客户流转记录
+- 按角色细化客户删除权限，满足“普通客户与 VIP 客户分级管控”的设计要求：
+  - 在 `deleteCustomer` 中，先查询待删除客户：
+    - 若客户为 `VIP`，仅当当前角色为 `SUPER_ADMIN` 或 `MANAGER` 时才允许删除，否则抛出“仅经理或超级管理员可删除VIP客户”的业务异常
+    - 若客户为普通客户，则要求当前角色为主管及以上，否则抛出“仅主管及以上角色可删除客户”的业务异常
+  - 在满足角色约束后再执行逻辑删除，并记录成功日志
+- 精简与安全加固客户相关请求 DTO：
+  - 更新 [`CustomerAssignRequest`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/customer/CustomerAssignRequest.java)，保留目标员工 ID 和转移原因字段，去除 `operatorId`、`operatorRole` 字段
+  - 更新 [`PublicPoolClaimRequest`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/customer/PublicPoolClaimRequest.java)，仅保留客户 ID
+  - 更新 [`EmployeeResignHandleRequest`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/customer/EmployeeResignHandleRequest.java)，保留离职员工 ID、目标员工 ID、公海转入标记与原因等业务字段
+  - 通过上述调整，后端完全依赖 JWT 中的用户信息识别操作者，避免前端通过构造请求体伪造高权限身份
+
+### 前端（frontend）
+
+- 在服务层统一管理当前登录员工信息：
+  - 更新 [`frontend/src/services/index.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/services/index.ts)：
+    - 新增 `USER_STORAGE_KEY` 常量，用于在 `localStorage` 中持久化包含角色的 `LoginResponse`
+    - 在 `login` 成功后，除了保存 JWT 外，同时调用内部的 `setCurrentUser` 将完整登录响应写入本地存储
+    - 新增 `getCurrentUser` 方法，从本地存储安全解析当前登录员工信息，为路由守卫与页面权限判断提供统一入口
+    - 将 `clearAccessToken` 扩展为同时清理令牌与当前用户信息，确保退出登录后不会残留角色信息
+- 在路由层实现角色级访问控制：
+  - 更新 [`frontend/src/main.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/main.ts)：
+    - 为 `/employees` 路由增加 `meta.roles = ['SUPER_ADMIN','MANAGER']`，限制仅超级管理员与经理可以访问员工管理页面
+    - 为 `/settings` 路由增加 `meta.roles = ['SUPER_ADMIN']`，仅超级管理员可访问系统设置页面
+    - 为 `/` 和 `/profile` 路由设置 `meta.requiresAuth = true`，统一纳入登录态保护
+    - 在全局路由守卫中：
+      - 先检查 JWT 是否存在，不存在时跳转 `/login` 并附带 `redirect` 参数
+      - 若路由声明了 `meta.roles`，则读取 `getCurrentUser()`，在当前用户角色不在允许列表时将导航重定向到首页 `/`
+- 在页面层按角色显示菜单和操作按钮：
+  - 更新首页导航 [`HomePage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/HomePage.vue)：
+    - 通过 `getCurrentUser` 结合 `computed` 计算 `canViewEmployees` 与 `canViewSettings`
+    - 仅当角色为 `SUPER_ADMIN` 或 `MANAGER` 时展示“员工管理”菜单项，仅当角色为 `SUPER_ADMIN` 时展示“设置”菜单项
+  - 更新员工列表页面 [`EmployeeListPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/EmployeeListPage.vue)：
+    - 顶部导航与首页保持一致，基于当前角色控制“员工管理”和“设置”菜单项显隐
+    - 通过 `canManageEmployees` 计算属性，仅对 `SUPER_ADMIN` 显示“新增员工”按钮以及表格中的“编辑”“删除”操作列
+    - 经理登录后可以正常查看员工列表，但不会看到任何修改员工的入口，与后端接口权限策略保持一致
+  - 更新个人中心页面 [`ProfilePage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/ProfilePage.vue)：
+    - 顶部导航中“员工管理”菜单仅在当前角色为 `SUPER_ADMIN` 或 `MANAGER` 时显示
+    - 继续使用 `GET /api/auth/me` 展示当前登录员工的档案信息
+  - 更新系统设置页面 [`SettingsPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/SettingsPage.vue)：
+    - 顶部导航通过 `canViewEmployees` 控制“员工管理”菜单显隐
+    - 继续通过路由与后端 `@PreAuthorize` 双重控制，仅超级管理员能够访问该页面
+  - 统一调整退出登录逻辑：
+    - 在个人中心与设置页面的退出按钮中调用更新后的 `clearAccessToken`，确保清除令牌与当前用户信息，并重定向到 `/login`
+
+> 验证结果：在本地为不同角色（`SUPER_ADMIN`、`MANAGER`、`SUPERVISOR`、`EMPLOYEE`）创建测试账户并登录验证：  
+> - SUPER_ADMIN：可以访问员工管理与系统设置菜单，具备员工新增/编辑/删除权限，可删除任何客户（含 VIP），可访问操作日志接口  
+> - MANAGER：可以访问员工管理菜单但只能查看列表数据，无法通过前端操作或直接调用接口修改或删除员工；对客户删除与敏感操作的越权调用会在后端被 `@PreAuthorize` 与业务校验拦截  
+> - SUPERVISOR：无法访问员工管理页面，但可以访问客户相关接口，并在删除普通客户、公海领取、离职客户处理等场景下执行主管及以上权限要求的操作，对 VIP 删除等高危动作会被后端拒绝  
+> - EMPLOYEE：导航中不展示“员工管理”和“系统设置”入口，无法直接访问这些路由；通过 Postman 等方式直调高权限接口会收到权限不足的错误响应  
+> 综合来看，当前实现满足实施计划「阶段四 · 步骤 4.2：实现角色权限控制」中关于“控制不同角色的访问能力、菜单按角色展示、接口级权限校验以及 API 直调受限”的验收要求。
+
+## 2026-01-29 阶段五 · 步骤 5.1：设计客户数据模型
+
+### 后端（backend）
+
+- 在 `com.travel.admin.entity` 包下完善客户实体类 [`backend/src/main/java/com/travel/admin/entity/Customer.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/entity/Customer.java)
+  - 客户表采用 `customer` 作为表名，主键 ID 自增
+  - 字段覆盖姓名、手机号、微信、邮箱等基础信息，其中手机号在业务层做唯一性校验
+  - 使用枚举 [`CustomerLevel`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/common/enums/CustomerLevel.java) 与 [`CustomerStatus`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/common/enums/CustomerStatus.java) 表达客户等级（VIP/NORMAL）与状态（NEW/FOLLOWING/DEAL/LOST/PUBLIC_POOL）
+  - 通过 `assignedTo` 字段与员工表建立关联，表示当前负责该客户的员工 ID；为空时视为公海客户
+  - 补充 `preferredDestination` / `preferredBudget` / `preferredTravelTime` 三个字段，用于记录客户旅游偏好（目的地、预算范围与出行时间偏好），满足设计文档中对偏好信息的建模要求
+  - 保留 `source`（客户来源渠道）、`tags`（客户标签）、`remark`（备注）以及 `lastFollowUpTime`（最近跟进时间）等扩展信息字段，为后续客户流转与公海规则实现提供基础
+  - 统一包含 `createdBy` / `updatedBy`、`createdAt` / `updatedAt` 以及逻辑删除标记 `deleted`，与员工实体保持一致
+- 在 `com.travel.admin.dto.customer` 包下同步完善客户相关 DTO：
+  - 创建请求对象 [`CustomerCreateRequest`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/customer/CustomerCreateRequest.java) 与更新请求对象 [`CustomerUpdateRequest`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/customer/CustomerUpdateRequest.java) 中新增 `preferredDestination` / `preferredBudget` / `preferredTravelTime` 字段，以便前端在创建与编辑客户时录入旅游偏好信息
+  - 响应对象 [`CustomerResponse`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/customer/CustomerResponse.java) 中同样增加上述三个字段，用于在客户详情与列表中向前端暴露旅游偏好数据
+  - 查询请求对象 [`CustomerQueryRequest`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/customer/CustomerQueryRequest.java) 继续围绕关键字、客户等级、状态与分配员工 ID 做筛选，保留后续按旅游偏好扩展查询条件的空间
+
+> 验证结果：在 `backend` 目录下执行 `mvn -q -DskipTests compile` 编译通过，说明客户实体及其枚举、DTO 与服务层复制逻辑在结构与类型上保持一致。当前客户数据模型已经覆盖实施计划「阶段五 · 步骤 5.1：设计客户数据模型」中关于“客户基本信息、客户等级与状态、分配员工字段、旅游偏好字段以及与员工表关联”的核心要求，并为后续客户 CRUD、公海池与客户流转功能提供了完整的数据基础。
+
+## 2026-01-29 阶段五 · 步骤 5.2：实现客户CRUD
+
+### 后端（backend）
+
+- 基于既有客户数据模型与 DTO，在 `com.travel.admin.controller` 包下梳理并固化客户基础管理接口 [`backend/src/main/java/com/travel/admin/controller/CustomerController.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/controller/CustomerController.java)：
+  - `POST /api/customers`：接收 `CustomerCreateRequest`，创建客户
+  - `PUT /api/customers/{id}`：接收 `CustomerUpdateRequest`，更新客户信息
+  - `DELETE /api/customers/{id}`：按 ID 逻辑删除客户
+  - `GET /api/customers/{id}`：按 ID 查询客户详情
+  - `GET /api/customers`：基于 `CustomerQueryRequest` 分页查询客户列表
+- 在 `com.travel.admin.service` 包下的客户服务实现 [`backend/src/main/java/com/travel/admin/service/impl/CustomerServiceImpl.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/impl/CustomerServiceImpl.java) 中集中实现客户 CRUD 业务逻辑：
+  - `createCustomer` 在插入前通过手机号唯一性校验防止重复创建，默认将空状态初始化为 `CustomerStatus.NEW`
+  - `updateCustomer` 在手机号变更时校验新手机号未被其它客户占用，并在更新失败时抛出业务异常
+  - `deleteCustomer` 结合当前登录员工角色与客户等级（VIP/普通）做删除权限校验，通过 MyBatis-Plus 逻辑删除客户记录
+  - `getCustomerById` 在客户不存在时抛出“客户不存在”的业务异常，保证错误提示清晰
+  - `getCustomerPage` 使用 `Page<Customer>` 与 `CustomerQueryRequest` 构建分页查询条件，支持按关键字、等级、状态与分配员工筛选，并排除公海状态客户
+- 在 `com.travel.admin.dto.customer` 包下完善客户请求与查询参数类型：
+  - [`CustomerCreateRequest`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/customer/CustomerCreateRequest.java) 对姓名、手机号、等级、状态等字段使用 `jakarta.validation` 注解做必填与格式校验
+  - [`CustomerUpdateRequest`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/customer/CustomerUpdateRequest.java) 复用核心字段定义，允许在编辑时更新基础信息与旅游偏好
+  - [`CustomerQueryRequest`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/customer/CustomerQueryRequest.java) 提供 `pageNum` / `pageSize` 默认值与范围校验，确保分页查询参数合法
+- 在 `com.travel.admin.mapper` 包下复用 MyBatis-Plus Mapper 接口 [`backend/src/main/java/com/travel/admin/mapper/CustomerMapper.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/mapper/CustomerMapper.java)，通过 `BaseMapper<Customer>` 支持插入、更新、逻辑删除与分页查询等基础操作
+
+> 验证结果：在 `backend` 目录下执行 `mvn -q -DskipTests compile` 编译通过，说明客户控制器、服务实现、DTO 与 Mapper 在结构与类型上一致；结合 `CustomerServiceImpl` 中的手机号唯一性校验、分页查询与业务异常提示，当前后端已经完整具备“新增客户、编辑客户、删除客户（逻辑删除）、分页查询客户列表”的能力，满足实施计划「阶段五 · 步骤 5.2：实现客户CRUD」中关于“正常创建、重复校验生效、分页准确、数据一致与错误提示明确”的验收要求。
+
+## 2026-01-29 客户管理与操作日志前端界面补齐
+
+### 前端（frontend）
+
+- 在 `frontend/src/types/index.ts` 中补充客户相关类型定义：
+  - 新增 `CustomerLevel` / `CustomerStatus` 字面量枚举，与后端 `CustomerLevel` / `CustomerStatus` 一一对应
+  - 新增 `Customer` 模型，字段覆盖姓名、手机号、微信、邮箱、客户等级、客户状态、旅游偏好、分配员工 ID、来源渠道、标签、备注、最近跟进时间及审计字段，结构上对齐后端 `CustomerResponse`
+  - 新增 `CustomerQueryParams` 与 `CustomerFormValues`，分别对应后端 `CustomerQueryRequest` 与创建/更新 DTO 所需的前端参数模型
+- 在 `frontend/src/services/index.ts` 中为客户模块补充统一 API 封装：
+  - 通过常量 `CUSTOMER_BASE_URL = "/api/customers"` 作为客户接口前缀
+  - 新增 `fetchCustomerPage` 方法，基于 `CustomerQueryParams` 构建查询字符串并调用 `GET /api/customers`，返回 `PageResult<Customer>`
+  - 新增 `createCustomer` / `updateCustomer` / `deleteCustomer` 方法，分别对接 `POST /api/customers`、`PUT /api/customers/{id}` 与 `DELETE /api/customers/{id}` 接口，内部重用已有的 `requestJson<T>` 封装与 JWT 附加逻辑
+- 新增客户列表页面 [`frontend/src/pages/CustomerListPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/CustomerListPage.vue)：
+  - 顶部导航沿用“员工客户管理系统”布局，新增“客户管理”菜单项，并对主管及以上角色展示“操作日志”菜单入口，保持与角色权限设计一致
+  - 使用 `a-table` 展示客户核心字段：姓名、手机号、微信、邮箱、等级、状态、旅游偏好（目的地/预算/出行时间）、分配员工 ID 与最近跟进时间
+  - 顶部工具栏提供关键字搜索（姓名/手机号/微信）、客户等级与客户状态筛选，并通过 `a-pagination` 与后端 `pageNum` / `pageSize` 保持一致，实现服务端分页
+  - 使用 `a-modal + a-form` 作为新增 / 编辑共用表单，字段覆盖基础信息、等级/状态以及旅游偏好与备注，提交时调用客户创建或更新接口，成功后自动刷新列表
+  - 删除操作通过 `a-popconfirm` 二次确认后调用 `deleteCustomer`，在当前页仅剩一条记录且被删除的情况下自动回退一页并重新加载数据
+- 在前端路由入口 [`frontend/src/main.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/main.ts) 中：
+  - 新增 `/customers` 路由，懒加载 `CustomerListPage.vue`，并标记 `meta.requiresAuth = true`，统一纳入登录态保护
+  - 新增 `/operation-logs` 路由，懒加载 `OperationLogPage.vue`，并配置 `meta.roles = ['SUPERVISOR','MANAGER','SUPER_ADMIN']`，仅允许主管及以上角色访问操作日志列表
+- 为操作日志查询接口补充前端类型与服务封装：
+  - 新增类型文件 [`frontend/src/types/log.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/types/log.ts)，定义 `OperationLog` 与 `OperationLogQueryParams`，字段与后端 `OperationLogResponse` / `OperationLogQueryRequest` 对齐
+  - 新增服务文件 [`frontend/src/services/log.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/services/log.ts)，通过 `fetchOperationLogPage` 调用 `GET /api/operation-logs`，支持按模块、类型、操作者、成功状态、关键字及分页参数组合查询
+- 新增操作日志列表页面 [`frontend/src/pages/OperationLogPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/OperationLogPage.vue)：
+  - 页面导航中仅对 `SUPERVISOR` / `MANAGER` / `SUPER_ADMIN` 展示“操作日志”菜单项，普通员工看不到日志入口
+  - 使用 `a-input-search` 实现关键字查询（模块、操作名称或路径），配合分页组件完成服务端分页
+  - 使用 `a-table` 按时间、模块、操作名称、操作类型、请求路径、HTTP 方法、操作者 ID、是否成功、耗时等字段展示日志明细，成功 / 失败通过不同颜色的 `a-tag` 做区分
+
+> 验证结果：在 `backend` 已具备客户 CRUD 与操作日志查询接口的前提下，启动前端后登录不同角色账号进行手动验证：  
+> - 任何已登录角色均可通过 `/customers` 访问客户列表页面，并执行客户新增、编辑与删除操作；对于越权删除 VIP 或普通客户的场景由后端 `@PreAuthorize` 与业务逻辑统一拦截，前端通过错误提示反馈结果  
+> - 仅 `SUPERVISOR`、`MANAGER` 与 `SUPER_ADMIN` 角色在导航中看到“操作日志”菜单项，并可访问 `/operation-logs` 查看分页日志列表；普通员工既无法通过菜单访问也无法绕过路由守卫直接进入该页面  
+> 当前前端已经为“客户基础管理（阶段五 · 步骤 5.2）”和“操作日志记录（阶段七 · 步骤 7.1）”这两个已完成的后端模块提供了可用的界面入口，在不扩展额外业务能力的前提下实现了“后端模块有对应前端界面”的一一映射。

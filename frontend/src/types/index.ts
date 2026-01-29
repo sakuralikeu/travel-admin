@@ -71,3 +71,58 @@ export interface LoginResponse {
   name: string;
   role: EmployeeRole;
 }
+
+export type CustomerLevel = "VIP" | "NORMAL";
+
+export type CustomerStatus =
+  | "NEW"
+  | "FOLLOWING"
+  | "DEAL"
+  | "LOST"
+  | "PUBLIC_POOL";
+
+export interface Customer {
+  id: number;
+  name: string;
+  phone: string;
+  wechat: string | null;
+  email: string | null;
+  preferredDestination: string | null;
+  preferredBudget: string | null;
+  preferredTravelTime: string | null;
+  level: CustomerLevel;
+  status: CustomerStatus;
+  assignedTo: number | null;
+  source: string | null;
+  tags: string | null;
+  remark: string | null;
+  lastFollowUpTime: string | null;
+  createdBy: number | null;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerQueryParams {
+  keyword?: string;
+  level?: CustomerLevel;
+  status?: CustomerStatus;
+  assignedTo?: number;
+  pageNum?: number;
+  pageSize?: number;
+}
+
+export interface CustomerFormValues {
+  id?: number;
+  name: string;
+  phone: string;
+  wechat?: string;
+  email?: string;
+  preferredDestination?: string;
+  preferredBudget?: string;
+  preferredTravelTime?: string;
+  level: CustomerLevel;
+  status: CustomerStatus;
+  assignedTo: number | null;
+  remark?: string;
+}

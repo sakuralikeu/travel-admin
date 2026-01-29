@@ -3,7 +3,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import Antd from "ant-design-vue";
 import "ant-design-vue/dist/reset.css";
 import App from "./App.vue";
-import { getAccessToken } from "./services";
+import { getAccessToken, getCurrentUser } from "./services";
 
 const routes = [
   {
@@ -12,19 +12,33 @@ const routes = [
   },
   {
     path: "/",
-    component: () => import("./pages/HomePage.vue")
+    component: () => import("./pages/HomePage.vue"),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: "/customers",
+    component: () => import("./pages/CustomerListPage.vue"),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: "/operation-logs",
+    component: () => import("./pages/OperationLogPage.vue"),
+    meta: { requiresAuth: true, roles: ["SUPERVISOR", "MANAGER", "SUPER_ADMIN"] }
   },
   {
     path: "/employees",
-    component: () => import("./pages/EmployeeListPage.vue")
+    component: () => import("./pages/EmployeeListPage.vue"),
+    meta: { requiresAuth: true, roles: ["SUPER_ADMIN", "MANAGER"] }
   },
   {
     path: "/profile",
-    component: () => import("./pages/ProfilePage.vue")
+    component: () => import("./pages/ProfilePage.vue"),
+    meta: { requiresAuth: true }
   },
   {
     path: "/settings",
-    component: () => import("./pages/SettingsPage.vue")
+    component: () => import("./pages/SettingsPage.vue"),
+    meta: { requiresAuth: true, roles: ["SUPER_ADMIN"] }
   }
 ];
 
@@ -45,6 +59,14 @@ router.beforeEach((to, from, next) => {
       query: { redirect: to.fullPath }
     });
     return;
+  }
+  const user = getCurrentUser();
+  const meta = to.meta as { roles?: string[] } | undefined;
+  if (meta && meta.roles && meta.roles.length > 0) {
+    if (!user || !meta.roles.includes(user.role)) {
+      next({ path: "/" });
+      return;
+    }
   }
   next();
 });

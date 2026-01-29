@@ -23,6 +23,12 @@ public class CustomerResponse {
 
     private CustomerStatus status;
 
+    private String preferredDestination;
+
+    private String preferredBudget;
+
+    private String preferredTravelTime;
+
     private Long assignedTo;
 
     private String source;
@@ -41,4 +47,3 @@ public class CustomerResponse {
 
     private LocalDateTime updatedAt;
 }
-
