@@ -163,3 +163,52 @@
 - 在 [`backend/pom.xml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/pom.xml) 中引入 `spring-boot-starter-aop` 依赖，使 AOP 切面能够正常工作
 
 > 验证结果：通过 `mvn test` 完成后端编译与基础测试，操作日志相关实体、切面、服务与控制器均可正常编译，核心员工与客户接口在调用时会自动写入操作日志，满足实施计划「步骤 7.1：操作日志记录」中“自动记录增删改查、记录操作者/IP/时间、支持查询、日志不可篡改”的要求（当前操作者信息待后续认证与授权模块接入后补充）。
+
+## 2026-01-29 阶段三 · 步骤 3.1：创建员工列表页面
+
+### 后端（backend）
+
+- 为兼容 Spring Boot 3.2.5 / Spring Framework 6.1 在 `factoryBeanObjectType` 属性上的类型收紧要求，将 MyBatis-Plus 依赖从 `mybatis-plus-boot-starter 3.5.5` 升级为 Spring Boot 3 专用的 [`mybatis-plus-spring-boot3-starter 3.5.9`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/pom.xml)
+  - 解决启动时出现的 `Invalid value type for attribute 'factoryBeanObjectType': java.lang.String` 异常
+  - 保持与 Spring 6.1 生态中 mybatis-spring 的兼容性
+- 按 MyBatis-Plus 官方拆分策略，在 [`backend/pom.xml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/pom.xml) 中新增 `mybatis-plus-jsqlparser 3.5.9` 依赖
+  - 支持 `MyBatisPlusInterceptor` 中的 `PaginationInnerInterceptor(DbType.MYSQL)` 分页插件正常工作
+  - 保持现有分页查询实现（员工、客户等模块）行为不变
+- 通过 `mvn spring-boot:run` 验证后端应用可在 `8080` 端口正常启动，员工相关接口可供前端列表页面调用
+
+### 前端（frontend）
+
+- 在 [`frontend/src/types/index.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/types/index.ts) 中补充与后端对齐的通用类型定义：
+  - `ApiResult<T>`：对接后端 `Result<T>`，包含 `code` / `message` / `data` / `timestamp`
+  - `PageResult<T>`：对接后端 `PageResult<T>`，包含 `records` / `total` / `pageNum` / `pageSize` / `totalPages`
+  - `EmployeeRole` / `EmployeeStatus` 字面量枚举，与后端 `EmployeeRole` / `EmployeeStatus` 一一对应
+  - `Employee`：对接后端 `EmployeeResponse`，作为列表展示和表单编辑的基础数据模型
+  - `EmployeeQueryParams` / `EmployeeFormValues`：分别对应后端 `EmployeeQueryRequest` 与 `EmployeeCreateRequest` / `EmployeeUpdateRequest` 的前端参数模型
+- 在 [`frontend/src/services/index.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/services/index.ts) 中实现员工管理相关 API 封装：
+  - `fetchEmployeePage`：调用 `GET /api/employees`，支持关键字、角色、状态、部门及分页参数，并返回 `PageResult<Employee>`
+  - `createEmployee`：调用 `POST /api/employees`，传入表单字段并映射为后端创建请求 DTO
+  - `updateEmployee`：调用 `PUT /api/employees/{id}`，在有新密码时才提交 `password` 字段，以复用后端长度校验逻辑
+  - `deleteEmployee`：调用 `DELETE /api/employees/{id}`，触发后端逻辑删除
+  - 抽取 `requestJson<T>` 辅助方法，统一处理 `Result<T>` 的 `code` / `message`，在非 200 时抛出错误，供页面使用 `message.error` 做用户提示
+- 在 [`frontend/src/main.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/main.ts) 中新增员工列表路由：
+  - 保留根路径 `/` 映射到 `HomePage.vue`
+  - 新增 `/employees` 路由，懒加载 [`EmployeeListPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/EmployeeListPage.vue)，作为员工管理入口
+- 新增员工列表页面 [`frontend/src/pages/EmployeeListPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/EmployeeListPage.vue)，使用 Ant Design Vue 实现：
+  - 页头沿用首页布局，标题为“员工客户管理系统”
+  - 使用 `a-card` 作为员工管理容器，上方工具栏包含：
+    - `a-input-search`：支持输入关键字并触发查询（姓名 / 账号 / 手机号），回车和“搜索”按钮均可生效
+    - `a-button`：新增员工按钮，点击后打开表单弹窗
+  - 使用 `a-table` 展示员工列表，字段包括：
+    - 登录账号、姓名、手机号、邮箱、部门、职位
+    - 角色、状态（通过本地映射将枚举值转换为中文文案）
+    - 入职日期，以及操作列（编辑 / 删除）
+  - 使用 `a-pagination` 实现前端分页控制，与后端 `pageNum` / `pageSize` 对齐，支持修改每页条数
+  - 通过组合式 API 管理 `employees` / `pageNum` / `pageSize` / `total` / `keyword` / `loading` 等状态，并调用 `fetchEmployeePage` 完成数据加载
+  - 使用 `a-modal + a-form` 实现新增 / 编辑共用表单：
+    - 表单字段覆盖账号、姓名、手机号、邮箱、部门、职位、角色、状态、入职/离职日期、密码
+    - 新增时密码为必填（至少 6 位），编辑时密码可选，留空则不修改原密码
+    - 提交前做最基本的必填项校验，后端仍通过 Validation 注解做最终约束
+  - 删除操作调用 `deleteEmployee`，在当前页只剩最后一条数据被删除时自动回退一页，并重新加载列表
+  - 使用 `ant-design-vue` 的 `message` 组件在加载失败或保存失败时给出友好提示
+
+> 验证结果：后端通过 `mvn spring-boot:run` 在 `8080` 端口正常启动，前端通过 `npm run dev` 启动后访问 `/employees` 可以看到员工列表页面。页面支持关键字搜索、分页切换、新增员工、编辑员工和删除员工等操作，接口调用均基于后端既有的员工管理 API，前后端字段与枚举保持一致，满足实施计划「阶段三 · 步骤 3.1：创建员工列表页面」中“表格展示员工信息、支持分页与搜索、支持新增/编辑”的要求。

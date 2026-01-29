@@ -49,7 +49,7 @@
 
 ## frontend 目录结构与文件作用
 
-前端采用 Vue 3 + TypeScript + Vite 架构，UI 使用 Ant Design Vue。当前只搭建了最小可运行骨架，后续会按实施计划逐步扩展页面与路由。
+前端采用 Vue 3 + TypeScript + Vite 架构，UI 使用 Ant Design Vue。在完成工程骨架之后，已按实施计划逐步扩展页面、类型定义与服务层，以支撑员工管理等核心功能。
 
 - [`frontend/package.json`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/package.json)
   - 前端工程的依赖与脚本声明
@@ -83,7 +83,7 @@
 - [`frontend/src/main.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/main.ts)
   - 前端应用入口脚本
   - 创建 Vue 应用实例
-  - 创建并注册 `vue-router` 路由
+  - 创建并注册 `vue-router` 路由，当前包含根路径 `/` 的首页和 `/employees` 的员工管理页面
   - 全局注册 Ant Design Vue 组件库
   - 将应用挂载到 `#app` 元素
 
@@ -96,12 +96,36 @@
   - 使用 Ant Design Vue 的 `Layout` 和 `Typography` 组件
   - 用于验证前端工程初始化成功，并提示后续开发将按实施计划推进
 
-> 当前已在 `src` 下创建基础前端目录结构：  
-> - `frontend/src/pages/`：页面组件目录，当前包含 `HomePage.vue`  
+- [`frontend/src/pages/EmployeeListPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/EmployeeListPage.vue)
+  - 员工管理列表页面，对应实施计划「阶段三 · 步骤 3.1」
+  - 使用 `a-table` 按账号、姓名、手机号、邮箱、部门、职位、角色、状态等字段展示员工数据
+  - 使用 `a-input-search` 和分页组件实现按关键字搜索与分页浏览
+  - 使用 `a-modal + a-form` 实现员工的新增与编辑，提交时调用后端 `POST /api/employees` 与 `PUT /api/employees/{id}` 接口
+  - 操作列提供编辑与删除按钮，删除时调用 `DELETE /api/employees/{id}` 完成逻辑删除
+
+- [`frontend/src/types/index.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/types/index.ts)
+  - 定义前端通用类型模型：
+    - `ApiResult<T>`：与后端 `Result<T>` 对齐
+    - `PageResult<T>`：与后端 `PageResult<T>` 对齐
+  - 定义员工相关业务类型：
+    - `EmployeeRole` / `EmployeeStatus`：与后端枚举一一对应
+    - `Employee`：对接后端 `EmployeeResponse`，用于列表展示与表单编辑
+    - `EmployeeQueryParams` / `EmployeeFormValues`：对接后端查询与创建/更新请求 DTO
+
+- [`frontend/src/services/index.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/services/index.ts)
+  - 封装与后端交互的 HTTP 请求：
+    - `fetchEmployeePage`：调用 `GET /api/employees` 获取分页员工列表
+    - `createEmployee`：调用 `POST /api/employees` 创建员工
+    - `updateEmployee`：调用 `PUT /api/employees/{id}` 更新员工信息
+    - `deleteEmployee`：调用 `DELETE /api/employees/{id}` 删除员工
+  - 内部统一使用 `fetch` 与 `ApiResult<T>` 类型解析后端响应，在 `code != 200` 时抛出错误，交由页面层使用 Ant Design Vue 的 `message` 组件做反馈
+
+> 当前已在 `src` 下创建基础前端目录结构并完成首个业务页面实现：  
+> - `frontend/src/pages/`：页面组件目录，当前包含 `HomePage.vue` 与 `EmployeeListPage.vue`  
 > - `frontend/src/components/`：通用组件与业务组件目录  
-> - `frontend/src/services/`：封装与后端交互的 HTTP 请求  
-> - `frontend/src/types/`：前端 TypeScript 类型定义  
-> 未来将按业务模块进一步在 `pages` 下拆分子目录，并在 `stores` 中补充状态管理实现。  
+> - `frontend/src/services/`：封装与后端交互的 HTTP 请求，已实现员工模块相关接口调用  
+> - `frontend/src/types/`：前端 TypeScript 类型定义，已对齐后端员工管理的 DTO 与枚举  
+> 未来将按员工、客户、订单等业务模块进一步在 `pages` 下拆分子目录，并在 `stores` 中补充状态管理实现。  
 
 ---
 
