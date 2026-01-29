@@ -30,16 +30,19 @@
 
 - [`backend/src/main/resources/application.yml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/resources/application.yml)
   - Spring Boot 默认配置文件
-  - 当前只配置了应用名和端口（`server.port: 8080`）
-  - 后续实施计划步骤 1.2 将在此基础上扩展多环境配置（`application-dev.yml` 等）、数据库连接、日志策略等
+  - 已配置应用名、端口、多环境 profile 入口以及 MyBatis-Plus 全局配置
+  - 通过 `spring.profiles.active=dev` 与 `application-*.yml` 组合完成 dev/test/prod 环境区分
 
-> 未来约定：  
+> 当前已在 `com.travel.admin` 包下创建基础公共模块：  
+> - `backend/src/main/java/com/travel/admin/common/result/`：统一响应结果封装  
+> - `backend/src/main/java/com/travel/admin/common/exception/`：业务异常与全局异常处理  
+> - `backend/src/main/java/com/travel/admin/config/`：MyBatis-Plus 分页与自动填充配置  
+> 后续新增具体业务功能时，将按以下分层创建 controller / service / mapper / entity 等模块：  
 > - `backend/src/main/java/com/travel/admin/controller/`：对外 REST 接口层  
 > - `backend/src/main/java/com/travel/admin/service/`：业务服务层（含 `impl` 实现）  
 > - `backend/src/main/java/com/travel/admin/mapper/`：MyBatis-Plus Mapper 接口  
 > - `backend/src/main/java/com/travel/admin/entity/`：数据库实体  
 > - `backend/src/main/java/com/travel/admin/dto/`：请求/响应 DTO  
-> - `backend/src/main/java/com/travel/admin/common/`：统一响应、异常、枚举等公共模块  
 > - `backend/src/main/resources/mapper/`：MyBatis XML 映射文件  
 
 ---
@@ -93,12 +96,12 @@
   - 使用 Ant Design Vue 的 `Layout` 和 `Typography` 组件
   - 用于验证前端工程初始化成功，并提示后续开发将按实施计划推进
 
-> 未来约定：  
-> - `frontend/src/pages/`：按业务模块划分页面（如 employees、customers、auth 等）  
-> - `frontend/src/components/`：复用度较高的业务组件 / 通用组件  
-> - `frontend/src/services/`：封装所有 HTTP 请求与后端接口交互  
-> - `frontend/src/stores/`：状态管理（如使用 Zustand 或其它方案时）  
-> - `frontend/src/types/`：前端 TS 类型定义  
+> 当前已在 `src` 下创建基础前端目录结构：  
+> - `frontend/src/pages/`：页面组件目录，当前包含 `HomePage.vue`  
+> - `frontend/src/components/`：通用组件与业务组件目录  
+> - `frontend/src/services/`：封装与后端交互的 HTTP 请求  
+> - `frontend/src/types/`：前端 TypeScript 类型定义  
+> 未来将按业务模块进一步在 `pages` 下拆分子目录，并在 `stores` 中补充状态管理实现。  
 
 ---
 
