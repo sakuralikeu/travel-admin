@@ -36,13 +36,14 @@
 > 当前已在 `com.travel.admin` 包下创建基础公共模块：  
 > - `backend/src/main/java/com/travel/admin/common/result/`：统一响应结果封装  
 > - `backend/src/main/java/com/travel/admin/common/exception/`：业务异常与全局异常处理  
-> - `backend/src/main/java/com/travel/admin/config/`：MyBatis-Plus 分页与自动填充配置  
+> - `backend/src/main/java/com/travel/admin/config/`：MyBatis-Plus 分页与自动填充配置、Spring Security 安全配置  
 > 后续新增具体业务功能时，将按以下分层创建 controller / service / mapper / entity 等模块：  
-> - `backend/src/main/java/com/travel/admin/controller/`：对外 REST 接口层  
+> - `backend/src/main/java/com/travel/admin/controller/`：对外 REST 接口层（包含员工管理、客户管理、操作日志查询与认证接口）  
 > - `backend/src/main/java/com/travel/admin/service/`：业务服务层（含 `impl` 实现）  
 > - `backend/src/main/java/com/travel/admin/mapper/`：MyBatis-Plus Mapper 接口  
 > - `backend/src/main/java/com/travel/admin/entity/`：数据库实体  
-> - `backend/src/main/java/com/travel/admin/dto/`：请求/响应 DTO  
+> - `backend/src/main/java/com/travel/admin/dto/`：请求/响应 DTO（含员工、客户、日志与登录请求/响应模型）  
+> - `backend/src/main/java/com/travel/admin/security/`：JWT 工具类、自定义用户详情服务与认证过滤器  
 > - `backend/src/main/resources/mapper/`：MyBatis XML 映射文件  
 
 ---
@@ -83,7 +84,8 @@
 - [`frontend/src/main.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/main.ts)
   - 前端应用入口脚本
   - 创建 Vue 应用实例
-  - 创建并注册 `vue-router` 路由，当前包含根路径 `/` 的首页和 `/employees` 的员工管理页面
+  - 创建并注册 `vue-router` 路由，当前包含登录页 `/login`、根路径 `/` 的首页和 `/employees` 的员工管理页面
+  - 在路由守卫中基于本地存储的 JWT 做基础登录态校验，未登录访问受保护页面时自动跳转到登录页
   - 全局注册 Ant Design Vue 组件库
   - 将应用挂载到 `#app` 元素
 
@@ -103,14 +105,20 @@
   - 使用 `a-modal + a-form` 实现员工的新增与编辑，提交时调用后端 `POST /api/employees` 与 `PUT /api/employees/{id}` 接口
   - 操作列提供编辑与删除按钮，删除时调用 `DELETE /api/employees/{id}` 完成逻辑删除
 
+- [`frontend/src/pages/LoginPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/LoginPage.vue)
+  - 登录页面，对应实施计划「阶段四 · 步骤 4.1」
+  - 使用 `a-form`、`a-input`、`a-input-password` 与 `a-button` 实现登录表单交互
+  - 调用后端 `POST /api/auth/login` 接口完成用户名密码登录，并在成功后保存 JWT 到本地存储，按路由参数 `redirect` 或默认跳转到 `/employees`
+
 - [`frontend/src/types/index.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/types/index.ts)
   - 定义前端通用类型模型：
     - `ApiResult<T>`：与后端 `Result<T>` 对齐
     - `PageResult<T>`：与后端 `PageResult<T>` 对齐
-  - 定义员工相关业务类型：
+  - 定义员工与认证相关业务类型：
     - `EmployeeRole` / `EmployeeStatus`：与后端枚举一一对应
     - `Employee`：对接后端 `EmployeeResponse`，用于列表展示与表单编辑
     - `EmployeeQueryParams` / `EmployeeFormValues`：对接后端查询与创建/更新请求 DTO
+    - `LoginRequest` / `LoginResponse`：对接后端登录请求与响应模型
 
 - [`frontend/src/services/index.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/services/index.ts)
   - 封装与后端交互的 HTTP 请求：
@@ -118,13 +126,15 @@
     - `createEmployee`：调用 `POST /api/employees` 创建员工
     - `updateEmployee`：调用 `PUT /api/employees/{id}` 更新员工信息
     - `deleteEmployee`：调用 `DELETE /api/employees/{id}` 删除员工
+    - `login`：调用 `POST /api/auth/login` 完成用户名密码登录，并在成功后保存 JWT
   - 内部统一使用 `fetch` 与 `ApiResult<T>` 类型解析后端响应，在 `code != 200` 时抛出错误，交由页面层使用 Ant Design Vue 的 `message` 组件做反馈
+  - 在公共请求方法中自动从本地存储读取 JWT，并在有令牌时为请求附加 `Authorization: Bearer <token>` 头
 
-> 当前已在 `src` 下创建基础前端目录结构并完成首个业务页面实现：  
-> - `frontend/src/pages/`：页面组件目录，当前包含 `HomePage.vue` 与 `EmployeeListPage.vue`  
+> 当前已在 `src` 下创建基础前端目录结构并完成首个业务页面与登录入口实现：  
+> - `frontend/src/pages/`：页面组件目录，当前包含 `HomePage.vue`、`EmployeeListPage.vue` 与 `LoginPage.vue`  
 > - `frontend/src/components/`：通用组件与业务组件目录  
-> - `frontend/src/services/`：封装与后端交互的 HTTP 请求，已实现员工模块相关接口调用  
-> - `frontend/src/types/`：前端 TypeScript 类型定义，已对齐后端员工管理的 DTO 与枚举  
+> - `frontend/src/services/`：封装与后端交互的 HTTP 请求，已实现员工模块与登录接口调用，并在请求层统一挂载 JWT  
+> - `frontend/src/types/`：前端 TypeScript 类型定义，已对齐后端员工管理与登录认证的 DTO 与枚举  
 > 未来将按员工、客户、订单等业务模块进一步在 `pages` 下拆分子目录，并在 `stores` 中补充状态管理实现。  
 
 ---

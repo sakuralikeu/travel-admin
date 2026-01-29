@@ -212,3 +212,82 @@
   - 使用 `ant-design-vue` 的 `message` 组件在加载失败或保存失败时给出友好提示
 
 > 验证结果：后端通过 `mvn spring-boot:run` 在 `8080` 端口正常启动，前端通过 `npm run dev` 启动后访问 `/employees` 可以看到员工列表页面。页面支持关键字搜索、分页切换、新增员工、编辑员工和删除员工等操作，接口调用均基于后端既有的员工管理 API，前后端字段与枚举保持一致，满足实施计划「阶段三 · 步骤 3.1：创建员工列表页面」中“表格展示员工信息、支持分页与搜索、支持新增/编辑”的要求。
+
+## 2026-01-29 阶段四 · 步骤 4.1：实现登录认证
+
+### 后端（backend）
+
+- 在 `com.travel.admin.security` 包下新增认证与 JWT 相关组件：
+  - [`backend/src/main/java/com/travel/admin/security/JwtTokenUtil.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/security/JwtTokenUtil.java)
+    - 基于 `io.jsonwebtoken` 提供 JWT 生成与解析能力
+    - 在令牌中写入用户 ID、用户名与角色等基础信息，令牌过期时间通过配置控制
+  - [`backend/src/main/java/com/travel/admin/security/JwtAuthenticationFilter.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/security/JwtAuthenticationFilter.java)
+    - 继承 `OncePerRequestFilter`，从请求头 `Authorization: Bearer <token>` 中解析 JWT
+    - 在令牌合法时从中提取用户 ID 与角色，并构造 `UsernamePasswordAuthenticationToken` 写入 `SecurityContext`
+  - [`backend/src/main/java/com/travel/admin/security/CustomUserDetailsService.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/security/CustomUserDetailsService.java)
+    - 实现 `UserDetailsService`，通过员工登录账号从 `employee` 表加载用户信息
+    - 校验员工状态，对于已离职或停用员工抛出 `UsernameNotFoundException` 阻止登录
+
+- 在 `com.travel.admin.config` 包下新增 Spring Security 配置类：
+  - [`backend/src/main/java/com/travel/admin/config/SecurityConfig.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/config/SecurityConfig.java)
+    - 使用 `SecurityFilterChain` API 配置 HTTP 安全策略
+    - 显式放行 `/api/auth/login` 以及 OpenAPI/Swagger 相关文档接口
+    - 其余接口均要求已认证用户访问，为后续角色权限控制打基础
+    - 配置无状态会话 `SessionCreationPolicy.STATELESS`，并在过滤器链中注册 `JwtAuthenticationFilter`
+    - 提供 `PasswordEncoder`（`BCryptPasswordEncoder`）与 `AuthenticationManager` Bean，复用到登录流程
+
+- 在 `com.travel.admin.dto.auth` 包下新增登录请求与响应 DTO：
+  - [`backend/src/main/java/com/travel/admin/dto/auth/LoginRequest.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/auth/LoginRequest.java)
+    - 包含 `username`、`password` 字段，并使用 `jakarta.validation` 做非空校验
+  - [`backend/src/main/java/com/travel/admin/dto/auth/LoginResponse.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/auth/LoginResponse.java)
+    - 返回 `token`、`userId`、`username`、`name` 与 `role`，供前端登录成功后保存与展示
+
+- 在 `com.travel.admin.controller` 包下新增认证控制器：
+  - [`backend/src/main/java/com/travel/admin/controller/AuthController.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/controller/AuthController.java)
+    - 暴露 `POST /api/auth/login` 接口，接收 `LoginRequest`，基于 `AuthenticationManager` 校验用户名和密码
+    - 登录成功后查询员工信息，并调用 `JwtTokenUtil` 生成 JWT 令牌，封装为 `LoginResponse` 返回
+    - 登录失败时抛出 `BadCredentialsException`，由全局异常处理器转换为统一的登录失败响应
+
+- 扩展全局异常处理与配置文件：
+  - 在 [`GlobalExceptionHandler`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/common/exception/GlobalExceptionHandler.java) 中新增对 `BadCredentialsException` 的处理，将登录失败统一映射为 `code = 401, message = "账号或密码错误"` 的响应
+  - 在多环境配置文件中新增 JWT 相关配置键：
+    - [`application-dev.yml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/resources/application-dev.yml)
+    - [`application-test.yml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/resources/application-test.yml)
+    - [`application-prod.yml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/resources/application-prod.yml)
+    - 统一增加 `jwt.secret` 与 `jwt.expiration` 字段，分别控制签名密钥与令牌有效期
+  - 在 [`backend/pom.xml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/pom.xml) 中引入 `io.jsonwebtoken:jjwt-api/jjwt-impl/jjwt-jackson` 依赖，用于 JWT 生成与解析
+
+> 验证结果：在 `backend` 目录下执行 `mvn -q -DskipTests compile` 编译通过，说明 Spring Security 与 JWT 相关配置类、DTO 与控制器均能正常编译。当前后端已具备基于用户名密码的登录接口以及对受保护接口的令牌校验能力，但尚未启用接口级角色权限控制（对应实施计划步骤 4.2，将在后续迭代中完成）。
+
+### 前端（frontend）
+
+- 在 `frontend/src/types/index.ts` 中补充登录相关类型定义：
+  - [`frontend/src/types/index.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/types/index.ts)
+    - 新增 `LoginRequest` / `LoginResponse` 类型，分别对应后端的登录请求与响应结构
+    - 保留并复用原有的 `ApiResult<T>`、`PageResult<T>` 与员工业务类型定义，确保与后端数据结构一致
+
+- 在 `frontend/src/services/index.ts` 中扩展统一请求工具与登录服务：
+  - 通过 `TOKEN_STORAGE_KEY` 定义本地存储键值，并导出 `getAccessToken` / `setAccessToken` / `clearAccessToken` 三个辅助函数，用于管理浏览器中的 JWT
+  - 在统一的 `requestJson<T>` 方法中：
+    - 在每次请求前自动从本地存储读取令牌，并在存在时为请求附加 `Authorization: Bearer <token>` 请求头
+    - 保留原有对 HTTP 状态码与后端 `ApiResult<T>.code` 字段的校验逻辑
+  - 新增 `login` 方法：
+    - 调用 `POST /api/auth/login` 接口，传入 `LoginRequest`，解析返回的 `LoginResponse`
+    - 在登录成功后将返回的 `token` 持久化到本地存储，供后续接口调用与路由守卫使用
+
+- 在 `frontend/src/pages` 下新增登录页面：
+  - [`frontend/src/pages/LoginPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/LoginPage.vue)
+    - 使用 Ant Design Vue 的 `a-layout` + `a-card` 搭建登录界面，保持与现有页面一致的头部 LOGO 样式
+    - 使用 `a-form` + `a-input` + `a-input-password` + `a-button` 实现登录表单交互
+    - 支持“记住我”勾选项（当前仅预留 UI，令牌持久化采用统一策略）
+    - 提交时调用 `login` 服务方法，在成功后根据路由参数 `redirect` 或默认跳转到 `/employees`，并通过 `message.success` 提示“登录成功”，失败时统一提示“账号或密码错误”
+
+- 在前端入口与路由层接入登录流程：
+  - 在 [`frontend/src/main.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/main.ts) 中：
+    - 新增 `/login` 路由，指向 `LoginPage.vue`
+    - 保持根路径 `/` 映射到首页，`/employees` 映射到员工列表页面
+    - 注册全局路由守卫，在除 `/login` 外的所有路由跳转前检查本地是否存在有效令牌：
+      - 若无令牌，则重定向到 `/login`，并附带 `redirect` 查询参数指向原目标路径
+      - 若存在令牌，则允许正常进入目标页面
+
+> 验证结果：前端在原有员工列表页面的基础上新增了登录页与基础登录态控制逻辑。登录成功后可正常访问 `/employees` 并拉取员工列表数据；在未登录状态直接访问 `/employees` 会被路由守卫重定向到 `/login`。当前前端仅基于 JWT 是否存在做登录态校验，尚未按角色区分菜单与按钮权限，这部分逻辑将配合实施计划步骤 4.2 在后续迭代中补充。

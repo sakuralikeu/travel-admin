@@ -1,7 +1,27 @@
 <template>
   <a-layout style="min-height: 100vh">
     <a-layout-header>
-      <div class="logo">员工客户管理系统</div>
+      <div class="header-inner">
+        <div class="logo">员工客户管理系统</div>
+        <a-menu
+          theme="dark"
+          mode="horizontal"
+          :selected-keys="['employees']"
+        >
+          <a-menu-item key="home">
+            <RouterLink to="/">首页</RouterLink>
+          </a-menu-item>
+          <a-menu-item key="employees">
+            <RouterLink to="/employees">员工管理</RouterLink>
+          </a-menu-item>
+          <a-menu-item key="profile">
+            <RouterLink to="/profile">个人中心</RouterLink>
+          </a-menu-item>
+          <a-menu-item key="settings">
+            <RouterLink to="/settings">设置</RouterLink>
+          </a-menu-item>
+        </a-menu>
+      </div>
     </a-layout-header>
     <a-layout-content style="padding: 24px">
       <a-card title="员工管理">
@@ -138,6 +158,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
+import { RouterLink } from "vue-router";
 import { message } from "ant-design-vue";
 import type { Employee, EmployeeFormValues } from "../types";
 import {
@@ -324,6 +345,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .logo {
   color: #fff;
   font-size: 18px;

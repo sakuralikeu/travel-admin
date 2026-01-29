@@ -11,3 +11,7 @@ logging:
     com.travel.admin: INFO
   file:
     name: logs/travel-admin-prod.log
+
+jwt:
+  secret: ${JWT_SECRET:travel-admin-prod-secret-4c3f9b7a8e2d5c1f0a9b7c6d4e3f2a1b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4}
+  expiration: 86400

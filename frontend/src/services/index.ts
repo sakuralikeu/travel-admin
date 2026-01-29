@@ -3,13 +3,43 @@ import type {
   PageResult,
   Employee,
   EmployeeFormValues,
-  EmployeeQueryParams
+  EmployeeQueryParams,
+  LoginRequest,
+  LoginResponse
 } from "../types";
 
 const EMPLOYEE_BASE_URL = "/api/employees";
+const AUTH_LOGIN_URL = "/api/auth/login";
+const AUTH_ME_URL = "/api/auth/me";
+
+const TOKEN_STORAGE_KEY = "travel_admin_token";
+
+export function getAccessToken(): string | null {
+  return localStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+export function setAccessToken(token: string) {
+  localStorage.setItem(TOKEN_STORAGE_KEY, token);
+}
+
+export function clearAccessToken() {
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
 
 async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, init);
+  const headers: Record<string, string> = {
+    ...(init && init.headers ? (init.headers as Record<string, string>) : {})
+  };
+
+  const token = getAccessToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(input, {
+    ...init,
+    headers
+  });
   if (!response.ok) {
     throw new Error("网络请求失败");
   }
@@ -18,6 +48,18 @@ async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T
     throw new Error(result.message || "请求失败");
   }
   return result.data;
+}
+
+export async function login(payload: LoginRequest): Promise<LoginResponse> {
+  const data = await requestJson<LoginResponse>(AUTH_LOGIN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  setAccessToken(data.token);
+  return data;
 }
 
 export async function fetchEmployeePage(
@@ -107,5 +149,11 @@ export async function updateEmployee(
 export async function deleteEmployee(id: number): Promise<void> {
   await requestJson<void>(`${EMPLOYEE_BASE_URL}/${id}`, {
     method: "DELETE"
+  });
+}
+
+export async function fetchCurrentEmployee(): Promise<Employee> {
+  return requestJson<Employee>(AUTH_ME_URL, {
+    method: "GET"
   });
 }
