@@ -8,7 +8,8 @@ import type {
   LoginResponse,
   Customer,
   CustomerFormValues,
-  CustomerQueryParams
+  CustomerQueryParams,
+  CustomerTransferRecord
 } from "../types";
 
 const EMPLOYEE_BASE_URL = "/api/employees";
@@ -210,6 +211,31 @@ export async function fetchCustomerPage(
   });
 }
 
+export async function fetchPublicPoolPage(
+  params: CustomerQueryParams
+): Promise<PageResult<Customer>> {
+  const searchParams = new URLSearchParams();
+  if (params.keyword) {
+    searchParams.append("keyword", params.keyword);
+  }
+  if (params.level) {
+    searchParams.append("level", params.level);
+  }
+  if (params.pageNum != null) {
+    searchParams.append("pageNum", String(params.pageNum));
+  }
+  if (params.pageSize != null) {
+    searchParams.append("pageSize", String(params.pageSize));
+  }
+  const queryString = searchParams.toString();
+  const url = queryString
+    ? `${CUSTOMER_BASE_URL}/public-pool?${queryString}`
+    : `${CUSTOMER_BASE_URL}/public-pool`;
+  return requestJson<PageResult<Customer>>(url, {
+    method: "GET"
+  });
+}
+
 export async function createCustomer(
   payload: CustomerFormValues
 ): Promise<Customer> {
@@ -264,5 +290,63 @@ export async function updateCustomer(
 export async function deleteCustomer(id: number): Promise<void> {
   await requestJson<void>(`${CUSTOMER_BASE_URL}/${id}`, {
     method: "DELETE"
+  });
+}
+
+export async function claimFromPublicPool(customerId: number): Promise<void> {
+  await requestJson<void>(`${CUSTOMER_BASE_URL}/public-pool/claim`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ customerId })
+  });
+}
+
+export async function assignCustomer(
+  customerId: number,
+  payload: { targetEmployeeId: number; reason: string }
+): Promise<void> {
+  await requestJson<void>(`${CUSTOMER_BASE_URL}/${customerId}/assign`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function fetchCustomerTransferRecords(
+  customerId: number,
+  params: { pageNum?: number; pageSize?: number }
+): Promise<PageResult<CustomerTransferRecord>> {
+  const searchParams = new URLSearchParams();
+  if (params.pageNum != null) {
+    searchParams.append("pageNum", String(params.pageNum));
+  }
+  if (params.pageSize != null) {
+    searchParams.append("pageSize", String(params.pageSize));
+  }
+  const queryString = searchParams.toString();
+  const url = queryString
+    ? `${CUSTOMER_BASE_URL}/${customerId}/transfers?${queryString}`
+    : `${CUSTOMER_BASE_URL}/${customerId}/transfers`;
+  return requestJson<PageResult<CustomerTransferRecord>>(url, {
+    method: "GET"
+  });
+}
+
+export async function handleEmployeeResign(payload: {
+  employeeId: number;
+  targetEmployeeId?: number | null;
+  moveToPublicPool?: boolean;
+  reason?: string;
+}): Promise<void> {
+  await requestJson<void>(`${CUSTOMER_BASE_URL}/employee/resign`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
   });
 }

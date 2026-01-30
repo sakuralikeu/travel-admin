@@ -444,3 +444,194 @@
 > - 任何已登录角色均可通过 `/customers` 访问客户列表页面，并执行客户新增、编辑与删除操作；对于越权删除 VIP 或普通客户的场景由后端 `@PreAuthorize` 与业务逻辑统一拦截，前端通过错误提示反馈结果  
 > - 仅 `SUPERVISOR`、`MANAGER` 与 `SUPER_ADMIN` 角色在导航中看到“操作日志”菜单项，并可访问 `/operation-logs` 查看分页日志列表；普通员工既无法通过菜单访问也无法绕过路由守卫直接进入该页面  
 > 当前前端已经为“客户基础管理（阶段五 · 步骤 5.2）”和“操作日志记录（阶段七 · 步骤 7.1）”这两个已完成的后端模块提供了可用的界面入口，在不扩展额外业务能力的前提下实现了“后端模块有对应前端界面”的一一映射。
+
+## 2026-01-29 阶段六 · 步骤 6.1：实现客户分配
+
+### 后端（backend）
+
+- 在 `com.travel.admin.entity` 包下新增客户流转记录实体 [`backend/src/main/java/com/travel/admin/entity/CustomerTransferRecord.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/entity/CustomerTransferRecord.java)
+  - 使用 `customer_transfer_record` 表记录客户在员工之间流转、公海领取与自动回收的完整历史
+  - 字段包含 `customerId`、`fromEmployeeId`、`toEmployeeId`、`operatorId`、`type`、`reason`、`createdAt` 以及逻辑删除标记 `deleted`
+  - 通过枚举 [`CustomerTransferType`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/common/enums/CustomerTransferType.java) 统一标识不同流转类型（手动分配、公海领取、自动回收、离职转移等）
+- 在客户服务接口与实现中补充客户分配与流转记录查询能力：
+  - 在 [`CustomerService`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/CustomerService.java) 中新增
+    - `void assignCustomer(Long customerId, CustomerAssignRequest request)`
+    - `PageResult<CustomerTransferRecordResponse> getCustomerTransferRecords(Long customerId, int pageNum, int pageSize)`
+  - 在 [`CustomerServiceImpl`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/impl/CustomerServiceImpl.java) 中实现上述方法：
+    - `assignCustomer` 要求当前登录角色为 `SUPERVISOR` 及以上，通过 `currentUserRole()` 与 `currentUserId()` 获取操作者信息
+    - 在手动分配时更新客户的 `assignedTo` 与 `status` 字段，并调用内部方法 `buildTransferRecord` 构造一条 `CustomerTransferRecord` 记录，写入原员工 ID、新员工 ID、操作者 ID、流转类型和转移原因
+    - `getCustomerTransferRecords` 基于 `customerId` 构建分页查询，按记录 ID 倒序返回客户的完整流转轨迹，并通过 `CustomerTransferRecordResponse` 对象暴露给前端
+- 在客户控制器中对外暴露客户分配与流转记录接口 [`backend/src/main/java/com/travel/admin/controller/CustomerController.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/controller/CustomerController.java)：
+  - `POST /api/customers/{id}/assign`：接收 `CustomerAssignRequest`，由主管及以上角色将客户分配或转移给指定员工，接口上通过 `@PreAuthorize("hasAnyRole('SUPERVISOR','MANAGER','SUPER_ADMIN')")` 做权限控制
+  - `GET /api/customers/{id}/transfers`：分页查询指定客户的流转记录，所有已登录员工均可查看自身所能访问客户的流转历史
+- 客户分配、公海领取、离职员工客户处理与自动回收等场景统一复用 `CustomerTransferRecord` 记录流转历史，满足“原员工、新员工、时间、原因、操作者可追溯”的要求，为后续敏感操作审批与防私单监控提供数据基础
+
+> 验证结果：在本地使用 `SUPERVISOR` / `MANAGER` / `SUPER_ADMIN` 角色调用 `POST /api/customers/{id}/assign` 接口，可将客户从原负责员工分配给新的员工，并在 `customer_transfer_record` 表中写入一条类型为 `ASSIGN` 的流转记录；使用任意已登录角色调用 `GET /api/customers/{id}/transfers` 可按时间倒序查看该客户的历史分配、公海领取与自动回收记录，对于越权分配的调用会在后端被角色校验与业务校验统一拦截。
+
+### 前端（frontend）
+
+- 在 `frontend/src/types/index.ts` 中补充客户流转相关类型定义：
+  - 新增 `CustomerTransferType` 字面量枚举，对应后端 `CustomerTransferType` 中的 `ASSIGN`、`CLAIM_FROM_POOL`、`AUTO_RECYCLE_TO_POOL` 等值
+  - 新增 `CustomerTransferRecord` 模型，字段覆盖客户 ID、原员工 ID、新员工 ID、操作人 ID、流转类型、原因与创建时间，对齐后端 `CustomerTransferRecordResponse`
+- 在统一服务文件 [`frontend/src/services/index.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/services/index.ts) 中补充客户分配与流转记录查询 API 封装：
+  - 新增 `assignCustomer` 方法，对接 `POST /api/customers/{customerId}/assign` 接口，提交 `targetEmployeeId` 与 `reason` 字段
+  - 新增 `fetchCustomerTransferRecords` 方法，对接 `GET /api/customers/{customerId}/transfers` 接口，支持通过 `pageNum` / `pageSize` 参数分页获取 `PageResult<CustomerTransferRecord>`
+- 在客户列表页面 [`frontend/src/pages/CustomerListPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/CustomerListPage.vue) 中扩展客户分配与流转记录 UI：
+  - 通过 `getCurrentUser` 读取当前登录用户角色，基于计算属性 `canAssignCustomer` 控制“分配”按钮仅对 `SUPERVISOR`、`MANAGER` 与 `SUPER_ADMIN` 角色可见
+  - 在客户表格操作列中新增：
+    - “分配”按钮：点击后打开分配弹窗，调用 `fetchEmployeePage` 加载可选员工列表，并通过 `assignCustomer` 将当前客户分配给选中的员工，同时要求填写转移原因
+    - “流转记录”按钮：点击后打开流转记录弹窗，调用 `fetchCustomerTransferRecords` 分页展示该客户的历史流转记录
+  - 分配弹窗中通过下拉框选择目标员工（展示员工姓名/账号与 ID），通过多行文本框填写转移原因，提交后自动刷新客户列表
+  - 流转记录弹窗中使用 `a-table` 展示时间、原员工 ID、新员工 ID、操作人 ID、类型与原因字段，并通过本地函数将 `CustomerTransferType` 映射为“手动分配、公海领取、自动回收、离职客户转移”等中文文案
+
+> 验证结果：在前端使用 `SUPERVISOR` / `MANAGER` / `SUPER_ADMIN` 角色登录后访问 `/customers`，可以在客户列表的操作列中看到“分配”和“流转记录”按钮：  
+> - 点击“分配”选择目标员工并填写原因后，后端成功更新客户的负责员工并写入流转记录，页面提示“分配客户成功”，列表数据刷新后可看到 `assignedTo` 已更新  
+> - 点击“流转记录”可在弹窗中按时间查看该客户的历史分配、公海领取与自动回收记录，翻页与刷新均正常工作  
+> - 以普通员工身份登录时，仅能看到“编辑”和“删除”等原有操作按钮，“分配”按钮不会显示，满足实施计划「阶段六 · 步骤 6.1：实现客户分配」中“由主管及以上角色执行客户分配、所有员工可查看客户流转轨迹”的前端验收要求。
+
+## 2026-01-29 阶段六 · 步骤 6.2：实现客户公海池
+
+### 后端（backend）
+
+- 在客户服务实现 [`CustomerServiceImpl`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/impl/CustomerServiceImpl.java) 中补充公海池相关规则与数据模型对齐：
+  - 为 `CustomerResponse` 增加 `publicPoolEnterTime` 与 `publicPoolEnterReason` 字段，并在 `getPublicPoolPage` 返回结果中基于 `customer_transfer_record` 表中最近一次类型为 `AUTO_RECYCLE_TO_POOL` 或 `EMPLOYEE_RESIGN_TO_POOL` 的记录填充进入公海时间与原因；对于自动回收的场景在未显式设置原因时使用“超过30天未跟进自动回收”作为默认文案
+  - 实现 `getPublicPoolPage`，基于 `CustomerQueryRequest` 过滤 `status = PUBLIC_POOL` 且 `assignedTo` 为空的客户，按 `lastFollowUpTime` 升序排序，并返回带有进入公海时间与原因的分页结果
+  - 在 `claimFromPublicPool` 中通过 `countTodayClaims` 统计当前登录员工当天领取次数，对普通员工启用“每日最多领取 20 个公海客户”的限制；超过上限时抛出“已超出每日领取上限, 需主管审批后处理”的业务异常
+  - 在 `claimFromPublicPool` 中对 VIP 客户增加角色限制，仅当当前角色为 `SUPERVISOR`、`MANAGER` 或 `SUPER_ADMIN` 时允许领取公海中的 VIP 客户，否则抛出“仅主管及以上角色可领取公海中的VIP客户”的业务异常
+  - 在离职员工客户处理逻辑 `handleEmployeeResign` 中，对批量转入公海的场景检测是否包含 VIP 客户；若包含且当前角色不是 `MANAGER` 或 `SUPER_ADMIN`，则抛出“仅经理或超级管理员可将VIP客户批量转入公海”的业务异常，保证“VIP 客户转入公海需经理审批”的规则在服务层落地
+  - 通过 `autoRecycleToPublicPool` 实现“普通客户超过30天无跟进记录自动回收至公海”的业务规则：筛选等级为 `NORMAL`、状态不为 `PUBLIC_POOL` 且 `lastFollowUpTime` 早于 30 天前或为空的客户，批量调用 `moveCustomerToPublicPool` 将其转入公海并记录一条 `AUTO_RECYCLE_TO_POOL` 类型的流转记录
+- 在客户控制器 [`CustomerController`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/controller/CustomerController.java) 中暴露公海池相关接口：
+  - `GET /api/customers/public-pool`：分页查询公海客户列表，返回带有进入公海时间与原因的 `PageResult<CustomerResponse>`，允许所有已登录角色访问
+  - `POST /api/customers/public-pool/claim`：领取公海客户，接收 `PublicPoolClaimRequest`，在服务层校验客户当前是否在公海、领取次数是否超限以及 VIP 客户领取角色限制等规则后，将客户分配给当前登录员工并记录一条类型为 `CLAIM_FROM_POOL` 的流转记录
+  - `POST /api/customers/employee/resign`：处理离职员工名下客户，接收 `EmployeeResignHandleRequest`，在服务层根据 `moveToPublicPool` 与 `targetEmployeeId` 决定是批量转入公海还是批量转交给指定员工，并统一记录类型为 `EMPLOYEE_RESIGN_TO_POOL` 或 `EMPLOYEE_RESIGN_TRANSFER` 的流转记录
+  - `POST /api/customers/public-pool/auto-recycle`：手动触发公海自动回收任务，限制仅 `MANAGER` 与 `SUPER_ADMIN` 角色可访问，便于在尚未接入调度系统时由运维或高权限用户按需执行一次性自动回收操作
+
+> 验证结果：在本地通过 `mvn -q -DskipTests compile` 完成后端编译，结合已有的客户流转记录查询接口验证：  
+> - 手动构造超过 30 天未跟进的普通客户并调用 `autoRecycleToPublicPool`，可看到这些客户被统一标记为 `PUBLIC_POOL`，且在 `customer_transfer_record` 中写入类型为 `AUTO_RECYCLE_TO_POOL` 的记录，前端公海列表展示的进入公海时间与原因与数据库记录一致  
+> - 使用普通员工账号多次调用 `POST /api/customers/public-pool/claim` 领取公海客户，在达到 20 个后再次领取会收到“已超出每日领取上限, 需主管审批后处理”的业务错误提示，而使用主管及以上角色登录时不受该上限限制  
+> - 构造包含 VIP 客户的离职员工并以 `SUPERVISOR` 角色调用 `POST /api/customers/employee/resign`、设置 `moveToPublicPool = true` 时会被阻止，并返回“仅经理或超级管理员可将VIP客户批量转入公海”的错误；改用 `MANAGER` 或 `SUPER_ADMIN` 角色调用则可以顺利将 VIP 客户转入公海并生成对应流转记录
+
+### 前端（frontend）
+
+- 在前端类型定义文件 [`frontend/src/types/index.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/types/index.ts) 中扩展客户模型：
+  - 为 `Customer` 增加可选字段 `publicPoolEnterTime` 与 `publicPoolEnterReason`，对接后端 `CustomerResponse` 中新增的公海进入时间与原因字段，用于在公海客户列表中展示
+- 在统一服务封装 [`frontend/src/services/index.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/services/index.ts) 中补充公海池与离职客户处理相关 API：
+  - 新增 `fetchPublicPoolPage` 方法，对接 `GET /api/customers/public-pool` 接口，支持按关键字、客户等级与分页参数组合查询公海客户列表
+  - 新增 `claimFromPublicPool` 方法，对接 `POST /api/customers/public-pool/claim` 接口，提交 `customerId` 实现公海客户领取
+  - 新增 `handleEmployeeResign` 方法，对接 `POST /api/customers/employee/resign` 接口，提交离职员工 ID、目标员工 ID、公海转入标记与原因等字段，用于批量处理离职员工名下客户
+- 新增公海客户列表页面 [`frontend/src/pages/PublicPoolPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/PublicPoolPage.vue)：
+  - 使用 `MainLayout` 统一布局，在左侧菜单中新增“公海客户”入口，所有已登录角色均可看到并访问 `/public-pool`
+  - 顶部工具栏提供 `a-input-search` 与 `a-select` 组合，支持按关键字（姓名 / 手机号 / 微信）和客户等级筛选公海客户
+  - 使用 `a-table` 展示公海客户列表，字段包括姓名、手机号、微信、等级、最近跟进时间、进入公海时间与进入公海原因，并基于 `Customer` 类型中的新字段渲染时间与原因信息
+  - 操作列提供“领取”按钮，点击后调用 `claimFromPublicPool` 并在成功后刷新当前页面；当当前用户角色为普通员工且公海客户为 VIP 时，按钮置为不可用，仅允许 `SUPERVISOR`、`MANAGER` 与 `SUPER_ADMIN` 角色领取 VIP 公海客户
+- 在员工列表页面 [`frontend/src/pages/EmployeeListPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/EmployeeListPage.vue) 中补充离职员工客户处理入口：
+  - 基于当前登录用户角色新增计算属性 `canHandleResignCustomers`，仅当角色为 `SUPER_ADMIN` 或 `MANAGER` 时展示“离职客户处理”操作列
+  - 在员工状态为“离职”时启用“处理离职客户”按钮，点击后弹出处理弹窗，允许选择“转入公海”或“转给指定员工”，并填写处理原因
+  - 在用户点击确认后调用 `handleEmployeeResign`，后端根据所选方式批量处理该员工名下客户（转入公海或转交给指定员工），操作完成后刷新员工列表并使用 `message.success` 给出反馈
+
+> 验证结果：在前端通过 `npm run dev` 启动后，使用不同角色账号登录进行手工测试：  
+> - 任意已登录角色均可通过左侧菜单进入“公海客户”页面，看到包含进入公海时间与原因字段的公海客户列表；普通员工在 VIP 客户行上只能查看而不能点击“领取”按钮，主管及以上角色可以正常领取 VIP 客户  
+> - 普通员工在公海页面连续领取多条普通客户记录，当后端返回“已超出每日领取上限, 需主管审批后处理”异常时，前端通过 `message.error` 将该错误文案直接展示给用户  
+> - 以 `SUPER_ADMIN` 或 `MANAGER` 角色进入“员工管理”页面，将某个员工状态改为“离职”后点击“处理离职客户”，选择“转入公海”或“转给指定员工”并填写原因后提交，可以看到后端成功处理该员工名下客户；以普通员工或主管角色无法看到该处理入口，访问权限与后端接口 `@PreAuthorize` 配置保持一致  
+
+## 2026-01-29 阶段七 · 步骤 7.2：敏感操作审批
+
+### 后端（backend）
+
+- 在 `com.travel.admin.common.enums` 包下新增审批相关枚举：
+  - [`backend/src/main/java/com/travel/admin/common/enums/ApprovalStatus.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/common/enums/ApprovalStatus.java)，用于表示审批状态 `PENDING` / `APPROVED` / `REJECTED`
+  - [`backend/src/main/java/com/travel/admin/common/enums/SensitiveOperationType.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/common/enums/SensitiveOperationType.java)，用于标识敏感操作类型，目前支持 `VIP_CUSTOMER_DELETE`（删除 VIP 客户）与 `CUSTOMER_TRANSFER`（跨部门客户转移）
+- 在 `com.travel.admin.entity` 包下新增审批实体：
+  - [`backend/src/main/java/com/travel/admin/entity/ApprovalRequest.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/entity/ApprovalRequest.java)
+  - 采用 `approval_request` 表记录审批请求，字段包含：
+    - `operationType`：敏感操作类型
+    - `customerId`：关联客户 ID
+    - `fromEmployeeId` / `toEmployeeId`：用于跨部门客户转移时记录原员工与目标员工 ID
+    - `requesterId`：申请人 ID
+    - `reason`：申请原因
+    - `status`：审批状态，使用 `ApprovalStatus`
+    - `approverId`：审批人 ID
+    - `decisionReason`：审批意见
+    - `createdAt` / `updatedAt`：时间字段采用 MyBatis-Plus 自动填充，`deleted` 使用逻辑删除标记
+- 在 `com.travel.admin.mapper` 包下新增审批 Mapper：
+  - [`backend/src/main/java/com/travel/admin/mapper/ApprovalRequestMapper.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/mapper/ApprovalRequestMapper.java)，继承 `BaseMapper<ApprovalRequest>`，用于对审批记录做增删改查
+- 在 `com.travel.admin.dto.approval` 包下新增审批相关 DTO：
+  - 创建请求对象 [`ApprovalCreateRequest`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/approval/ApprovalCreateRequest.java)，包含 `operationType`、`customerId`、可选的 `targetEmployeeId` 以及必填的申请原因
+  - 审批决策请求对象 [`ApprovalDecisionRequest`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/approval/ApprovalDecisionRequest.java)，包含是否通过 `approved` 以及可选的审批意见
+  - 查询请求对象 [`ApprovalQueryRequest`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/approval/ApprovalQueryRequest.java)，支持按审批类型、状态以及分页参数过滤审批记录
+  - 响应对象 [`ApprovalResponse`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/approval/ApprovalResponse.java)，向前端返回审批的基础信息与状态
+- 在 `com.travel.admin.service` 包下新增审批服务接口与实现：
+  - 服务接口 [`backend/src/main/java/com/travel/admin/service/ApprovalService.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/ApprovalService.java)，定义：
+    - `createApproval`：提交审批请求
+    - `getApprovalPage`：分页查询审批记录
+    - `decide`：提交审批决策
+  - 服务实现 [`backend/src/main/java/com/travel/admin/service/impl/ApprovalServiceImpl.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/impl/ApprovalServiceImpl.java)：
+    - `createApproval`：
+      - 对 `VIP_CUSTOMER_DELETE`：校验客户存在且等级为 VIP，并确保不存在重复的待处理删除审批后，生成一条 `PENDING` 状态的审批记录
+      - 对 `CUSTOMER_TRANSFER`：校验客户存在且当前已分配员工，加载原员工与目标员工信息，当检测到跨部门转移且不存在重复的待处理审批时，生成一条 `PENDING` 状态的审批记录，记录原/目标员工 ID 与转移原因
+    - `getApprovalPage`：基于审批类型与状态构建分页查询条件，按 ID 倒序返回审批记录，并转换为 `PageResult<ApprovalResponse>`
+    - `decide`：
+      - 对已删除或非 `PENDING` 状态的记录直接拒绝操作
+      - 当 `approved == false` 时，仅更新状态为 `REJECTED`、记录审批人 ID 与审批意见
+      - 当 `approved == true` 时，根据 `operationType` 分别执行：
+        - `VIP_CUSTOMER_DELETE`：要求当前角色为 `MANAGER` 或 `SUPER_ADMIN`，在确认客户仍为 VIP 后调用 `customerMapper.deleteById` 删除客户，删除成功后将审批状态置为 `APPROVED`
+        - `CUSTOMER_TRANSFER`：同样要求当前角色为 `MANAGER` 或 `SUPER_ADMIN`，校验客户当前负责员工仍为审批记录中的 `fromEmployeeId` 后，将客户 `assignedTo` 更新为 `toEmployeeId`，并插入一条类型为 `CustomerTransferType.TRANSFER` 的流转记录，记录操作者 ID 与转移原因
+- 在 `com.travel.admin.controller` 包下新增审批控制器：
+  - [`backend/src/main/java/com/travel/admin/controller/ApprovalController.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/controller/ApprovalController.java)
+  - 暴露接口：
+    - `POST /api/approvals`：提交敏感操作审批请求，使用 `@PreAuthorize("hasAnyRole('EMPLOYEE','SUPERVISOR','MANAGER','SUPER_ADMIN')")` 允许所有已登录角色发起删除 VIP 客户或跨部门转移的审批
+    - `GET /api/approvals`：分页查询审批记录，仅允许 `SUPERVISOR`、`MANAGER` 与 `SUPER_ADMIN` 访问
+    - `POST /api/approvals/{id}/decision`：提交审批决策（通过或拒绝），同样仅允许 `SUPERVISOR`、`MANAGER` 与 `SUPER_ADMIN` 调用，内部再根据具体操作类型限制实际执行者只能为经理或超级管理员
+- 收紧客户删除与跨部门转移的执行入口，将高风险操作统一纳入审批流：
+  - 在客户服务实现 [`CustomerServiceImpl`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/impl/CustomerServiceImpl.java) 中更新删除逻辑：
+    - 对 VIP 客户删除不再允许直接执行逻辑删除，而是无论当前角色等级如何都抛出“删除VIP客户需提交审批, 请通过审批流程处理”的业务异常，引导前端通过审批接口发起删除请求
+    - 对普通客户删除仍要求当前角色为主管及以上
+  - 在同一类中为客户分配逻辑增加跨部门限制：
+    - 新增对原员工与目标员工部门的比对逻辑，通过注入的 [`EmployeeMapper`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/mapper/EmployeeMapper.java) 查询员工部门
+    - 当检测到跨部门转移且当前角色为 `SUPERVISOR` 时，抛出“跨部门客户转移需经理或超级管理员审批, 请发起审批后再执行”的业务异常，阻止主管直接跨部门转移客户
+    - 保留 `MANAGER` 与 `SUPER_ADMIN` 直接跨部门转移客户的权限，满足“更高权限审批”的设计要求，同时提供审批路径供主管等角色发起跨部门转移申请
+
+> 验证结果：在 `backend` 目录下执行 `mvn -q -DskipTests compile` 编译通过，说明审批模块相关实体、枚举、DTO、服务与控制器与现有工程结构保持一致，类型和依赖完整。通过以下场景进行手工验证：  
+> - 以 `SUPERVISOR` 或普通员工身份登录，尝试在前端客户列表中删除 VIP 客户时不会直接触发删除，而是通过前端调用 `POST /api/approvals` 创建一条类型为 `VIP_CUSTOMER_DELETE` 的审批记录，数据库中客户仍然存在  
+> - 以 `MANAGER` 或 `SUPER_ADMIN` 身份登录访问 `/approvals` 页面，对该删除审批点击“通过”后，可在数据库中看到对应 VIP 客户记录被逻辑删除，同时审批状态从 `PENDING` 更新为 `APPROVED`；再次对同一客户发起删除审批会被后端以“客户不存在”拦截  
+> - 对于跨部门客户转移，使用 `SUPERVISOR` 登录在客户列表中选择原部门员工名下客户，并在分配弹窗中选择其他部门员工作为目标时，前端根据员工列表中的部门信息判断为跨部门场景，不再直接调用转移接口，而是调用 `POST /api/approvals` 创建类型为 `CUSTOMER_TRANSFER` 的审批记录；随后使用 `MANAGER` 或 `SUPER_ADMIN` 在 `/approvals` 页面通过该审批后，可以看到客户 `assignedTo` 字段更新为目标员工 ID，并在流转记录中新增一条类型为 `TRANSFER` 的记录  
+> - 通过 Postman 等工具直接调用 `DELETE /api/customers/{id}` 删除 VIP 客户会收到“删除VIP客户需提交审批, 请通过审批流程处理”的业务异常；直接以 `SUPERVISOR` 角色调用 `POST /api/customers/{id}/assign` 进行跨部门转移也会被后端拒绝，保证高风险操作无法绕过审批流直接执行  
+> 综上，当前实现满足实施计划「阶段七 · 步骤 7.2：敏感操作审批」中关于“删除 VIP 客户需审批、跨部门客户转移通过审批后执行、拒绝不执行以及审批记录完整可查”的核心要求（数据导出审批将在后续引入导出接口时复用同一审批模块）。
+
+### 前端（frontend）
+
+- 在 `frontend/src/types` 目录下新增审批相关类型定义：
+  - [`frontend/src/types/approval.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/types/approval.ts)
+  - 定义 `SensitiveOperationType` 与 `ApprovalStatus` 字面量枚举，以及 `Approval` / `ApprovalQueryParams` 类型，用于描述审批记录列表与查询参数
+- 在 `frontend/src/services` 目录下新增审批服务封装：
+  - [`frontend/src/services/approval.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/services/approval.ts)
+  - 基于统一的 `requestJson` 封装实现：
+    - `fetchApprovalPage`：调用 `GET /api/approvals`，按审批类型、状态与分页参数获取审批记录列表
+    - `createApproval`：调用 `POST /api/approvals`，用于发起删除 VIP 客户或跨部门客户转移的审批
+    - `decideApproval`：调用 `POST /api/approvals/{id}/decision`，提交审批结果与可选的审批意见
+- 在导航与路由层增加审批入口：
+  - 更新主布局组件 [`frontend/src/components/MainLayout.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/components/MainLayout.vue)：
+    - 在侧边菜单中新增“敏感操作审批”菜单项，仅对 `SUPERVISOR`、`MANAGER` 与 `SUPER_ADMIN` 角色显示
+    - 点击菜单项时跳转到 `/approvals` 路由
+  - 更新前端路由入口 [`frontend/src/main.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/main.ts)：
+    - 新增 `/approvals` 路由，懒加载 [`ApprovalPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/ApprovalPage.vue)，并配置 `meta.requiresAuth = true` 与 `meta.roles = ['SUPERVISOR','MANAGER','SUPER_ADMIN']`
+- 新增敏感操作审批列表页面：
+  - [`frontend/src/pages/ApprovalPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/ApprovalPage.vue)
+  - 使用 `MainLayout` 统一布局，在卡片头部提供审批状态与审批类型筛选
+  - 使用 `a-table` 展示审批 ID、类型、客户 ID、原/目标员工 ID、申请人 ID、原因、状态、审批人 ID、审批意见以及创建/更新时间
+  - 对处于 `PENDING` 状态的记录在操作列中提供“通过”“拒绝”两个按钮，点击后弹出审批意见输入框，提交后调用 `decideApproval` 完成审批流转
+- 在客户列表页面中接入审批发起入口：
+  - 更新客户列表页面 [`frontend/src/pages/CustomerListPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/CustomerListPage.vue)：
+    - 通过导入 `createApproval`，在删除逻辑中区分 VIP 客户与普通客户：
+      - 当用户对 VIP 客户点击“删除”时，不再直接调用 `deleteCustomer`，而是调用 `createApproval` 提交类型为 `VIP_CUSTOMER_DELETE` 的审批，并提示“已提交删除VIP客户审批”，列表数据保持不变
+      - 普通客户删除行为保持不变，仍直接调用 `deleteCustomer`，在当前页仅剩一条记录时删除后自动回退一页并刷新列表
+    - 在客户分配提交逻辑中增加跨部门检测与审批发起：
+      - 基于分配弹窗中加载的员工列表与当前客户 `assignedTo` 字段判断原员工与目标员工是否属于不同部门
+      - 当检测到跨部门场景且当前登录角色为 `SUPERVISOR` 时，不再直接调用 `assignCustomer`，而是调用 `createApproval` 提交类型为 `CUSTOMER_TRANSFER` 的审批请求，并提示“已提交跨部门客户转移审批”
+      - 对于同部门转移或当前角色为 `MANAGER` / `SUPER_ADMIN` 的情况仍直接调用 `assignCustomer`，保持高权限用户可直接执行跨部门转移的能力
+
+> 验证结果：在前端通过 `npm run dev` 启动应用后，使用不同角色账号进行手工测试：  
+> - 以普通员工或主管身份登录访问 `/customers` 页面，对 VIP 客户点击“删除”时会弹出确认框，确认后前端调用 `createApproval` 成功提交审批，请求成功后列表不发生变化，并在 `/approvals` 页面看到新增一条状态为 `PENDING`、类型为“删除VIP客户”的审批记录  
+> - 以主管身份在客户分配弹窗中选择不同部门的目标员工并填写原因后提交，前端检测到跨部门场景并调用 `createApproval` 创建类型为“跨部门客户转移”的审批记录，客户当前负责员工保持不变；改用经理或超级管理员登录执行同样操作时则会直接完成分配，客户 `assignedTo` 字段在页面刷新后更新为目标员工 ID  
+> - 以主管/经理/超级管理员登录访问 `/approvals` 页面，可以通过筛选条件查看待审批记录，对任意一条点击“通过”或“拒绝”并填写审批意见后，审批列表刷新为最新状态；对于删除 VIP 客户的审批，通过后在客户列表中不再显示该客户，对于跨部门转移审批，通过后在客户列表中可以看到客户已被转移到目标员工名下，同时在“流转记录”弹窗中新增一条类型为“手动转移”的记录  
+> 通过上述端到端测试，前端已为删除 VIP 客户与跨部门客户转移这两类敏感操作提供了完整的审批发起与执行闭环，与后端审批模块协同工作，满足实施计划中对“提交审批成功、审批通过后执行、拒绝不执行以及审批记录可查”的前端验收要求。 

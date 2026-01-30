@@ -39,6 +39,10 @@ public class CustomerResponse {
 
     private LocalDateTime lastFollowUpTime;
 
+    private LocalDateTime publicPoolEnterTime;
+
+    private String publicPoolEnterReason;
+
     private Long createdBy;
 
     private Long updatedBy;

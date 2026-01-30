@@ -21,8 +21,18 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: "/public-pool",
+    component: () => import("./pages/PublicPoolPage.vue"),
+    meta: { requiresAuth: true }
+  },
+  {
     path: "/operation-logs",
     component: () => import("./pages/OperationLogPage.vue"),
+    meta: { requiresAuth: true, roles: ["SUPERVISOR", "MANAGER", "SUPER_ADMIN"] }
+  },
+  {
+    path: "/approvals",
+    component: () => import("./pages/ApprovalPage.vue"),
     meta: { requiresAuth: true, roles: ["SUPERVISOR", "MANAGER", "SUPER_ADMIN"] }
   },
   {

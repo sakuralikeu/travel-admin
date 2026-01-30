@@ -97,6 +97,8 @@ export interface Customer {
   tags: string | null;
   remark: string | null;
   lastFollowUpTime: string | null;
+   publicPoolEnterTime?: string | null;
+   publicPoolEnterReason?: string | null;
   createdBy: number | null;
   updatedBy: number | null;
   createdAt: string;
@@ -125,4 +127,23 @@ export interface CustomerFormValues {
   status: CustomerStatus;
   assignedTo: number | null;
   remark?: string;
+}
+
+export type CustomerTransferType =
+  | "ASSIGN"
+  | "TRANSFER"
+  | "CLAIM_FROM_POOL"
+  | "AUTO_RECYCLE_TO_POOL"
+  | "EMPLOYEE_RESIGN_TRANSFER"
+  | "EMPLOYEE_RESIGN_TO_POOL";
+
+export interface CustomerTransferRecord {
+  id: number;
+  customerId: number;
+  fromEmployeeId: number | null;
+  toEmployeeId: number | null;
+  operatorId: number | null;
+  type: CustomerTransferType;
+  reason: string | null;
+  createdAt: string;
 }

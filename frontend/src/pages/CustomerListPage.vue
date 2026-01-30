@@ -75,6 +75,16 @@
                   删除
                 </a-button>
               </a-popconfirm>
+              <a-button
+                v-if="canAssignCustomer"
+                type="link"
+                @click="openAssignModal(record)"
+              >
+                分配
+              </a-button>
+              <a-button type="link" @click="openTransferModal(record)">
+                流转记录
+              </a-button>
             </template>
           </a-table-column>
         </a-table>
@@ -145,6 +155,87 @@
           </a-form-item>
         </a-form>
       </a-modal>
+      <a-modal
+        v-model:open="assignModalOpen"
+        title="分配客户"
+        :confirm-loading="assignConfirmLoading"
+        destroy-on-close
+        @ok="handleAssignSubmit"
+      >
+        <a-form :label-col="{ span: 6 }" :wrapper-col="{ span: 18 }">
+          <a-form-item label="目标员工" required>
+            <a-select
+              v-model:value="assignTargetEmployeeId"
+              :loading="employeeLoading"
+              placeholder="请选择接收客户的员工"
+            >
+              <a-select-option
+                v-for="employee in employees"
+                :key="employee.id"
+                :value="employee.id"
+              >
+                {{ employee.name || employee.username }}（ID: {{ employee.id }}）
+              </a-select-option>
+            </a-select>
+          </a-form-item>
+          <a-form-item label="转移原因" required>
+            <a-input-textarea
+              v-model:value="assignReason"
+              :rows="3"
+              placeholder="请输入转移原因"
+            />
+          </a-form-item>
+        </a-form>
+      </a-modal>
+      <a-modal
+        v-model:open="transferModalOpen"
+        title="客户流转记录"
+        :footer="null"
+        width="720px"
+        destroy-on-close
+      >
+        <a-table
+          :data-source="transferRecords"
+          :loading="transferLoading"
+          :pagination="false"
+          row-key="id"
+          size="small"
+        >
+          <a-table-column title="时间" data-index="createdAt" key="createdAt" />
+          <a-table-column
+            title="原员工ID"
+            data-index="fromEmployeeId"
+            key="fromEmployeeId"
+          />
+          <a-table-column
+            title="新员工ID"
+            data-index="toEmployeeId"
+            key="toEmployeeId"
+          />
+          <a-table-column
+            title="操作人ID"
+            data-index="operatorId"
+            key="operatorId"
+          />
+          <a-table-column title="类型" data-index="type" key="type">
+            <template #default="{ text }">
+              {{ getTransferTypeLabel(text) }}
+            </template>
+          </a-table-column>
+          <a-table-column title="原因" data-index="reason" key="reason" />
+        </a-table>
+        <div class="pagination">
+          <a-pagination
+            :current="transferPageNum"
+            :page-size="transferPageSize"
+            :total="transferTotal"
+            :show-size-changer="true"
+            :page-size-options="['10', '20', '50']"
+            @change="handleTransferPageChange"
+            @showSizeChange="handleTransferPageSizeChange"
+          />
+        </div>
+      </a-modal>
   </MainLayout>
 </template>
 
@@ -152,17 +243,24 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { message } from "ant-design-vue";
 import type {
+  Employee,
   Customer,
   CustomerFormValues,
   CustomerLevel,
-  CustomerStatus
+  CustomerStatus,
+  CustomerTransferRecord,
+  CustomerTransferType
 } from "../types";
 import {
   createCustomer,
   deleteCustomer,
   fetchCustomerPage,
-  updateCustomer
+  updateCustomer,
+  fetchEmployeePage,
+  assignCustomer,
+  fetchCustomerTransferRecords
 } from "../services";
+import { createApproval } from "../services/approval";
 import MainLayout from "../components/MainLayout.vue";
 import { getCurrentUser } from "../services";
 
@@ -196,6 +294,33 @@ const formState = reactive<CustomerFormValues>({
 
 const currentUser = getCurrentUser();
 
+const canAssignCustomer = computed(() => {
+  if (!currentUser) {
+    return false;
+  }
+  return (
+    currentUser.role === "SUPERVISOR" ||
+    currentUser.role === "MANAGER" ||
+    currentUser.role === "SUPER_ADMIN"
+  );
+});
+
+const employees = ref<Employee[]>([]);
+const employeeLoading = ref(false);
+const assignModalOpen = ref(false);
+const assignConfirmLoading = ref(false);
+const assigningCustomerId = ref<number | null>(null);
+const assignTargetEmployeeId = ref<number | null>(null);
+const assignReason = ref("");
+
+const transferModalOpen = ref(false);
+const transferRecords = ref<CustomerTransferRecord[]>([]);
+const transferLoading = ref(false);
+const transferPageNum = ref(1);
+const transferPageSize = ref(10);
+const transferTotal = ref(0);
+const transferCustomerId = ref<number | null>(null);
+
 function getLevelLabel(value: CustomerLevel) {
   if (value === "VIP") {
     return "VIP";
@@ -225,6 +350,28 @@ function getCustomerStatusLabel(value: CustomerStatus) {
   return value;
 }
 
+function getTransferTypeLabel(value: CustomerTransferType) {
+  if (value === "ASSIGN") {
+    return "手动分配";
+  }
+  if (value === "TRANSFER") {
+    return "手动转移";
+  }
+  if (value === "CLAIM_FROM_POOL") {
+    return "公海领取";
+  }
+  if (value === "AUTO_RECYCLE_TO_POOL") {
+    return "自动回收至公海";
+  }
+  if (value === "EMPLOYEE_RESIGN_TRANSFER") {
+    return "离职客户转移";
+  }
+  if (value === "EMPLOYEE_RESIGN_TO_POOL") {
+    return "离职客户转公海";
+  }
+  return value;
+}
+
 async function loadCustomers() {
   try {
     loading.value = true;
@@ -241,6 +388,24 @@ async function loadCustomers() {
     message.error("加载客户列表失败");
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadEmployees() {
+  if (employees.value.length > 0) {
+    return;
+  }
+  try {
+    employeeLoading.value = true;
+    const page = await fetchEmployeePage({
+      pageNum: 1,
+      pageSize: 100
+    });
+    employees.value = page.records;
+  } catch (error) {
+    message.error("加载员工列表失败");
+  } finally {
+    employeeLoading.value = false;
   }
 }
 
@@ -278,6 +443,25 @@ function openEditModal(record: Customer) {
   modalOpen.value = true;
 }
 
+async function openAssignModal(record: Customer) {
+  if (!canAssignCustomer.value) {
+    message.warning("当前角色无权分配客户");
+    return;
+  }
+  assigningCustomerId.value = record.id;
+  assignTargetEmployeeId.value = record.assignedTo;
+  assignReason.value = "";
+  assignModalOpen.value = true;
+  await loadEmployees();
+}
+
+function openTransferModal(record: Customer) {
+  transferCustomerId.value = record.id;
+  transferPageNum.value = 1;
+  transferPageSize.value = 10;
+  loadTransferRecords();
+}
+
 async function handleSubmit() {
   if (!formState.name || !formState.phone) {
     message.warning("请填写姓名和手机号");
@@ -301,17 +485,96 @@ async function handleSubmit() {
   }
 }
 
+async function handleAssignSubmit() {
+  if (assigningCustomerId.value == null) {
+    message.error("未找到要分配的客户");
+    return;
+  }
+  if (!assignTargetEmployeeId.value) {
+    message.warning("请选择目标员工");
+    return;
+  }
+  if (!assignReason.value || !assignReason.value.trim()) {
+    message.warning("请输入转移原因");
+    return;
+  }
+  try {
+    assignConfirmLoading.value = true;
+    const customer = customers.value.find(
+      item => item.id === assigningCustomerId.value
+    );
+    if (!customer) {
+      message.error("未找到要分配的客户");
+      return;
+    }
+    const fromEmployeeId = customer.assignedTo;
+    const toEmployeeId = assignTargetEmployeeId.value;
+    let crossDepartment = false;
+    if (fromEmployeeId != null && toEmployeeId != null) {
+      const fromEmployee = employees.value.find(
+        item => item.id === fromEmployeeId
+      );
+      const toEmployee = employees.value.find(
+        item => item.id === toEmployeeId
+      );
+      if (fromEmployee && toEmployee) {
+        if (fromEmployee.department != null || toEmployee.department != null) {
+          crossDepartment =
+            fromEmployee.department !== toEmployee.department;
+        }
+      }
+    }
+    if (
+      crossDepartment &&
+      currentUser &&
+      currentUser.role === "SUPERVISOR"
+    ) {
+      await createApproval({
+        operationType: "CUSTOMER_TRANSFER",
+        customerId: assigningCustomerId.value,
+        targetEmployeeId: assignTargetEmployeeId.value,
+        reason: assignReason.value.trim()
+      });
+      message.success("已提交跨部门客户转移审批");
+      assignModalOpen.value = false;
+      return;
+    }
+    await assignCustomer(assigningCustomerId.value, {
+      targetEmployeeId: assignTargetEmployeeId.value,
+      reason: assignReason.value.trim()
+    });
+    message.success("分配客户成功");
+    assignModalOpen.value = false;
+    await loadCustomers();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "分配客户失败";
+    message.error(msg);
+  } finally {
+    assignConfirmLoading.value = false;
+  }
+}
+
 async function handleDelete(record: Customer) {
   try {
     loading.value = true;
-    await deleteCustomer(record.id);
-    message.success("删除客户成功");
-    if (customers.value.length === 1 && pageNum.value > 1) {
-      pageNum.value -= 1;
+    if (record.level === "VIP") {
+      await createApproval({
+        operationType: "VIP_CUSTOMER_DELETE",
+        customerId: record.id,
+        reason: `申请删除VIP客户：${record.name || ""} (ID: ${record.id})`
+      });
+      message.success("已提交删除VIP客户审批");
+    } else {
+      await deleteCustomer(record.id);
+      message.success("删除客户成功");
+      if (customers.value.length === 1 && pageNum.value > 1) {
+        pageNum.value -= 1;
+      }
+      await loadCustomers();
     }
-    await loadCustomers();
   } catch (error) {
-    message.error("删除客户失败");
+    const msg = error instanceof Error ? error.message : "操作失败";
+    message.error(msg);
   } finally {
     loading.value = false;
   }
@@ -332,6 +595,37 @@ function handlePageSizeChange(page: number, size: number) {
   pageNum.value = page;
   pageSize.value = size;
   loadCustomers();
+}
+
+async function loadTransferRecords() {
+  if (transferCustomerId.value == null) {
+    return;
+  }
+  try {
+    transferLoading.value = true;
+    const page = await fetchCustomerTransferRecords(transferCustomerId.value, {
+      pageNum: transferPageNum.value,
+      pageSize: transferPageSize.value
+    });
+    transferRecords.value = page.records;
+    transferTotal.value = page.total;
+  } catch (error) {
+    message.error("加载客户流转记录失败");
+  } finally {
+    transferLoading.value = false;
+  }
+}
+
+function handleTransferPageChange(page: number, size: number) {
+  transferPageNum.value = page;
+  transferPageSize.value = size;
+  loadTransferRecords();
+}
+
+function handleTransferPageSizeChange(page: number, size: number) {
+  transferPageNum.value = page;
+  transferPageSize.value = size;
+  loadTransferRecords();
 }
 
 onMounted(() => {

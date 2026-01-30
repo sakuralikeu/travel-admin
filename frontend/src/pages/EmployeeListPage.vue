@@ -50,6 +50,21 @@
               </a-button>
             </template>
           </a-table-column>
+          <a-table-column
+            v-if="canHandleResignCustomers"
+            key="resign"
+            title="离职客户处理"
+          >
+            <template #default="{ record }">
+              <a-button
+                type="link"
+                :disabled="record.status !== 'RESIGNED'"
+                @click="openResignModal(record)"
+              >
+                处理离职客户
+              </a-button>
+            </template>
+          </a-table-column>
         </a-table>
         <div class="pagination">
           <a-pagination
@@ -132,6 +147,51 @@
           </a-form-item>
         </a-form>
       </a-modal>
+      <a-modal
+        v-model:open="resignModalOpen"
+        title="处理离职员工客户"
+        :confirm-loading="resignConfirmLoading"
+        destroy-on-close
+        @ok="handleResignSubmit"
+      >
+        <a-form :label-col="{ span: 6 }" :wrapper-col="{ span: 18 }">
+          <a-form-item label="处理方式" required>
+            <a-radio-group v-model:value="resignMoveToPublicPool">
+              <a-radio :value="true">
+                转入公海
+              </a-radio>
+              <a-radio :value="false">
+                转给指定员工
+              </a-radio>
+            </a-radio-group>
+          </a-form-item>
+          <a-form-item
+            v-if="!resignMoveToPublicPool"
+            label="目标员工"
+            required
+          >
+            <a-select
+              v-model:value="resignTargetEmployeeId"
+              placeholder="请选择接收客户的员工"
+            >
+              <a-select-option
+                v-for="employee in resignCandidates"
+                :key="employee.id"
+                :value="employee.id"
+              >
+                {{ employee.name || employee.username }}（ID: {{ employee.id }}）
+              </a-select-option>
+            </a-select>
+          </a-form-item>
+          <a-form-item label="原因" required>
+            <a-input-textarea
+              v-model:value="resignReason"
+              :rows="3"
+              placeholder="请输入处理原因"
+            />
+          </a-form-item>
+        </a-form>
+      </a-modal>
   </MainLayout>
 </template>
 
@@ -145,7 +205,8 @@ import {
   deleteEmployee,
   fetchEmployeePage,
   updateEmployee,
-  getCurrentUser
+  getCurrentUser,
+  handleEmployeeResign
 } from "../services";
 
 const employees = ref<Employee[]>([]);
@@ -183,6 +244,13 @@ const canManageEmployees = computed(() => {
   return currentUser.role === "SUPER_ADMIN";
 });
 
+const canHandleResignCustomers = computed(() => {
+  if (!currentUser) {
+    return false;
+  }
+  return currentUser.role === "SUPER_ADMIN" || currentUser.role === "MANAGER";
+});
+
 const employeeRoleOptions = [
   { label: "超级管理员", value: "SUPER_ADMIN" },
   { label: "经理", value: "MANAGER" },
@@ -205,6 +273,22 @@ function getStatusLabel(value: string) {
   const item = employeeStatusOptions.find(option => option.value === value);
   return item ? item.label : value;
 }
+
+const resignModalOpen = ref(false);
+const resignConfirmLoading = ref(false);
+const resignEmployeeId = ref<number | null>(null);
+const resignMoveToPublicPool = ref(true);
+const resignTargetEmployeeId = ref<number | null>(null);
+const resignReason = ref("");
+
+const resignCandidates = computed(() =>
+  employees.value.filter(
+    item =>
+      item.status === "ACTIVE" &&
+      resignEmployeeId.value != null &&
+      item.id !== resignEmployeeId.value
+  )
+);
 
 async function loadEmployees() {
   try {
@@ -263,6 +347,14 @@ function openEditModal(record: Employee) {
   modalOpen.value = true;
 }
 
+function openResignModal(record: Employee) {
+  resignEmployeeId.value = record.id;
+  resignMoveToPublicPool.value = true;
+  resignTargetEmployeeId.value = null;
+  resignReason.value = "";
+  resignModalOpen.value = true;
+}
+
 async function handleSubmit() {
   if (!formState.username || !formState.name || !formState.phone) {
     message.warning("请填写必填字段");
@@ -308,6 +400,39 @@ async function handleDelete(record: Employee) {
     message.error("删除员工失败");
   } finally {
     loading.value = false;
+  }
+}
+
+async function handleResignSubmit() {
+  if (resignEmployeeId.value == null) {
+    message.error("未找到需要处理的离职员工");
+    return;
+  }
+  if (!resignMoveToPublicPool.value && !resignTargetEmployeeId.value) {
+    message.warning("请选择目标员工");
+    return;
+  }
+  if (!resignReason.value || !resignReason.value.trim()) {
+    message.warning("请输入处理原因");
+    return;
+  }
+  try {
+    resignConfirmLoading.value = true;
+    await handleEmployeeResign({
+      employeeId: resignEmployeeId.value,
+      targetEmployeeId: resignMoveToPublicPool.value
+        ? null
+        : resignTargetEmployeeId.value,
+      moveToPublicPool: resignMoveToPublicPool.value,
+      reason: resignReason.value.trim()
+    });
+    message.success("处理离职员工客户成功");
+    resignModalOpen.value = false;
+    await loadEmployees();
+  } catch (error) {
+    message.error("处理离职员工客户失败");
+  } finally {
+    resignConfirmLoading.value = false;
   }
 }
 

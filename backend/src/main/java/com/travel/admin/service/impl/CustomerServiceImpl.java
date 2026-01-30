@@ -25,8 +25,10 @@ import com.travel.admin.dto.customer.EmployeeResignHandleRequest;
 import com.travel.admin.dto.customer.PublicPoolClaimRequest;
 import com.travel.admin.entity.Customer;
 import com.travel.admin.entity.CustomerTransferRecord;
+import com.travel.admin.entity.Employee;
 import com.travel.admin.mapper.CustomerMapper;
 import com.travel.admin.mapper.CustomerTransferRecordMapper;
+import com.travel.admin.mapper.EmployeeMapper;
 import com.travel.admin.service.CustomerService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +50,8 @@ public class CustomerServiceImpl implements CustomerService {
     private final CustomerMapper customerMapper;
 
     private final CustomerTransferRecordMapper customerTransferRecordMapper;
+
+    private final EmployeeMapper employeeMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -105,9 +109,7 @@ public class CustomerServiceImpl implements CustomerService {
         }
         EmployeeRole role = currentUserRole();
         if (customer.getLevel() == CustomerLevel.VIP) {
-            if (role != EmployeeRole.SUPER_ADMIN && role != EmployeeRole.MANAGER) {
-                throw new BusinessException("仅经理或超级管理员可删除VIP客户");
-            }
+            throw new BusinessException("删除VIP客户需提交审批, 请通过审批流程处理");
         } else {
             if (!isSupervisorOrAbove(role)) {
                 throw new BusinessException("仅主管及以上角色可删除客户");
@@ -167,6 +169,12 @@ public class CustomerServiceImpl implements CustomerService {
         Long originalAssignee = customer.getAssignedTo();
         if (Objects.equals(originalAssignee, request.getTargetEmployeeId())) {
             return;
+        }
+        if (originalAssignee != null && request.getTargetEmployeeId() != null) {
+            if (isCrossDepartment(originalAssignee, request.getTargetEmployeeId())
+                    && role == EmployeeRole.SUPERVISOR) {
+                throw new BusinessException("跨部门客户转移需经理或超级管理员审批, 请发起审批后再执行");
+            }
         }
         customer.setAssignedTo(request.getTargetEmployeeId());
         if (customer.getStatus() == CustomerStatus.PUBLIC_POOL) {
@@ -246,6 +254,15 @@ public class CustomerServiceImpl implements CustomerService {
         List<Customer> customers = customerMapper.selectList(wrapper);
         if (customers.isEmpty()) {
             return;
+        }
+        if (moveToPublicPool) {
+            boolean hasVipCustomer = customers.stream()
+                    .anyMatch(customer -> customer.getLevel() == CustomerLevel.VIP);
+            if (hasVipCustomer
+                    && operatorRole != EmployeeRole.MANAGER
+                    && operatorRole != EmployeeRole.SUPER_ADMIN) {
+                throw new BusinessException("仅经理或超级管理员可将VIP客户批量转入公海");
+            }
         }
         for (Customer customer : customers) {
             Long fromEmployeeId = customer.getAssignedTo();
@@ -348,6 +365,9 @@ public class CustomerServiceImpl implements CustomerService {
     private CustomerResponse toResponse(Customer customer) {
         CustomerResponse response = new CustomerResponse();
         BeanUtils.copyProperties(customer, response);
+        if (customer.getStatus() == CustomerStatus.PUBLIC_POOL) {
+            fillPublicPoolInfo(response);
+        }
         return response;
     }
 
@@ -369,10 +389,50 @@ public class CustomerServiceImpl implements CustomerService {
         return record;
     }
 
+    private void fillPublicPoolInfo(CustomerResponse response) {
+        if (response.getId() == null) {
+            return;
+        }
+        LambdaQueryWrapper<CustomerTransferRecord> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CustomerTransferRecord::getCustomerId, response.getId())
+                .in(CustomerTransferRecord::getType,
+                        CustomerTransferType.AUTO_RECYCLE_TO_POOL,
+                        CustomerTransferType.EMPLOYEE_RESIGN_TO_POOL)
+                .orderByDesc(CustomerTransferRecord::getCreatedAt)
+                .last("LIMIT 1");
+        CustomerTransferRecord record = customerTransferRecordMapper.selectOne(wrapper);
+        if (record == null) {
+            return;
+        }
+        response.setPublicPoolEnterTime(record.getCreatedAt());
+        if (record.getReason() != null && !record.getReason().isEmpty()) {
+            response.setPublicPoolEnterReason(record.getReason());
+        } else if (record.getType() == CustomerTransferType.AUTO_RECYCLE_TO_POOL) {
+            response.setPublicPoolEnterReason("超过30天未跟进自动回收");
+        } else if (record.getType() == CustomerTransferType.EMPLOYEE_RESIGN_TO_POOL) {
+            response.setPublicPoolEnterReason("离职员工客户转入公海");
+        }
+    }
+
     private boolean isSupervisorOrAbove(EmployeeRole role) {
         return role == EmployeeRole.SUPER_ADMIN
                 || role == EmployeeRole.MANAGER
                 || role == EmployeeRole.SUPERVISOR;
+    }
+
+    private boolean isCrossDepartment(Long fromEmployeeId, Long toEmployeeId) {
+        if (Objects.equals(fromEmployeeId, toEmployeeId)) {
+            return false;
+        }
+        Employee fromEmployee = employeeMapper.selectById(fromEmployeeId);
+        Employee toEmployee = employeeMapper.selectById(toEmployeeId);
+        if (fromEmployee == null || toEmployee == null) {
+            return false;
+        }
+        if (fromEmployee.getDepartment() == null && toEmployee.getDepartment() == null) {
+            return false;
+        }
+        return !Objects.equals(fromEmployee.getDepartment(), toEmployee.getDepartment());
     }
 
     private void requireSupervisorOrAbove(EmployeeRole role) {

@@ -19,6 +19,12 @@
         <a-menu-item key="customers">
           客户管理
         </a-menu-item>
+        <a-menu-item key="public-pool">
+          公海客户
+        </a-menu-item>
+        <a-menu-item v-if="canViewApprovals" key="approvals">
+          敏感操作审批
+        </a-menu-item>
         <a-menu-item v-if="canViewLogs" key="operation-logs">
           操作日志
         </a-menu-item>
@@ -104,6 +110,17 @@ const canViewLogs = computed(() => {
   );
 });
 
+const canViewApprovals = computed(() => {
+  if (!currentUser) {
+    return false;
+  }
+  return (
+    currentUser.role === "SUPERVISOR" ||
+    currentUser.role === "MANAGER" ||
+    currentUser.role === "SUPER_ADMIN"
+  );
+});
+
 const currentUserName = computed(() => {
   if (!currentUser) {
     return "未登录";
@@ -122,6 +139,14 @@ function handleMenuClick(info: { key: string }) {
   }
   if (info.key === "customers") {
     router.push("/customers");
+    return;
+  }
+  if (info.key === "public-pool") {
+    router.push("/public-pool");
+    return;
+  }
+  if (info.key === "approvals") {
+    router.push("/approvals");
     return;
   }
   if (info.key === "operation-logs") {
@@ -179,4 +204,3 @@ function handleLogout() {
   cursor: pointer;
 }
 </style>
-

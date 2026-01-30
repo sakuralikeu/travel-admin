@@ -16,7 +16,7 @@
 
 ## backend 目录结构与文件作用
 
-后端采用标准 Spring Boot 分层结构，当前已在员工管理、客户管理、操作日志与认证授权等方面完成基础实现，后续会在此目录下继续扩展 controller / service / mapper / entity 等模块。
+后端采用标准 Spring Boot 分层结构，当前已在员工管理、客户管理、客户流转与公海池、操作日志、敏感操作审批与认证授权等方面完成基础实现，后续会在此目录下继续扩展 controller / service / mapper / entity 等模块。
 
 - [`backend/pom.xml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/pom.xml)
   - Maven 工程配置文件
@@ -84,7 +84,7 @@
 - [`frontend/src/main.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/main.ts)
   - 前端应用入口脚本
   - 创建 Vue 应用实例
-  - 创建并注册 `vue-router` 路由，当前包含登录页 `/login`、根路径 `/` 的首页、`/employees` 的员工管理页面、`/profile` 的个人中心以及 `/settings` 的系统设置页面
+  - 创建并注册 `vue-router` 路由，当前包含登录页 `/login`、根路径 `/` 的首页、`/employees` 的员工管理页面、`/customers` 的客户管理页面、`/public-pool` 的公海客户页面、`/operation-logs` 的操作日志页面、`/approvals` 的敏感操作审批页面、`/profile` 的个人中心以及 `/settings` 的系统设置页面
   - 在路由守卫中基于本地存储的 JWT 与当前登录员工角色做校验：未登录访问受保护页面时自动跳转到登录页，角色不匹配时重定向回首页
   - 全局注册 Ant Design Vue 组件库
   - 将应用挂载到 `#app` 元素
@@ -104,7 +104,17 @@
   - 使用 `a-input-search` 和分页组件实现按关键字搜索与分页浏览
   - 使用 `a-modal + a-form` 实现员工的新增与编辑，提交时调用后端 `POST /api/employees` 与 `PUT /api/employees/{id}` 接口
   - 操作列提供编辑与删除按钮，仅对 `SUPER_ADMIN` 角色显示，经理角色只能查看列表数据
+  - 额外提供“离职客户处理”操作入口，对 `SUPER_ADMIN` 与 `MANAGER` 角色展示；支持在员工状态为“离职”时选择“转入公海”或“转给指定员工”，并录入原因后调用 `POST /api/customers/employee/resign` 批量处理其名下客户
   - 结合路由守卫与后端 `@PreAuthorize`，实现“超级管理员可管理员工、经理仅可查看”的前后端一致权限策略
+
+- [`frontend/src/pages/OperationLogPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/OperationLogPage.vue)
+  - 操作日志列表页面，仅对 `SUPERVISOR`、`MANAGER` 与 `SUPER_ADMIN` 角色在导航中展示入口
+  - 使用 `a-table` 展示模块、操作名称、请求路径、HTTP 方法、操作者 ID、是否成功、耗时等字段，并提供关键字搜索与分页能力
+
+- [`frontend/src/pages/ApprovalPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/ApprovalPage.vue)
+  - 敏感操作审批列表页面，对应实施计划「阶段七 · 步骤 7.2」
+  - 使用 `a-table` 展示审批类型、客户 ID、原/目标员工 ID、申请人 ID、原因、状态、审批人 ID 与审批意见等字段
+  - 仅对 `SUPERVISOR`、`MANAGER` 与 `SUPER_ADMIN` 角色在导航中展示入口，支持对待审批记录执行“通过”或“拒绝”操作
 
 - [`frontend/src/pages/CustomerListPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/CustomerListPage.vue)
   - 客户管理列表页面，为已实现的客户 CRUD 与查询接口提供前端入口
@@ -112,6 +122,15 @@
   - 顶部工具栏支持按关键字、客户等级与客户状态组合筛选，并通过分页组件与后端 `pageNum` / `pageSize` 对齐
   - 使用 `a-modal + a-form` 实现客户新增与编辑表单，字段覆盖基础信息与旅游偏好，提交时调用后端 `POST /api/customers` 与 `PUT /api/customers/{id}` 接口
   - 删除操作通过 `DELETE /api/customers/{id}` 触发后端逻辑删除，前端在当前页仅剩一条记录被删除时自动回退一页并重新加载列表
+  - 在主管及以上角色登录时，操作列额外提供“分配”按钮，调用后端 `POST /api/customers/{id}/assign` 接口将客户手动分配给指定员工，并记录流转原因
+  - 提供“流转记录”按钮，弹出对话框按时间展示客户在员工之间的分配、公海领取与自动回收等流转轨迹，对接 `GET /api/customers/{id}/transfers` 接口
+
+- [`frontend/src/pages/PublicPoolPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/PublicPoolPage.vue)
+  - 公海客户列表页面，对应实施计划「阶段六 · 步骤 6.2」
+  - 通过调用 `GET /api/customers/public-pool` 展示当前处于公海状态的客户列表，表格字段包含姓名、手机号、微信、等级、最近跟进时间、进入公海时间与进入公海原因
+  - 顶部支持按关键字与客户等级筛选，并通过分页组件与后端 `pageNum` / `pageSize` 对齐
+  - 操作列提供“领取”按钮，调用后端 `POST /api/customers/public-pool/claim` 接口领取公海客户；普通员工领取时受每日 20 个的限额限制，超限由后端返回“需主管审批”的提示
+  - 对于 VIP 客户，仅在 `SUPERVISOR`、`MANAGER` 与 `SUPER_ADMIN` 角色登录时展示可点击的领取按钮，其余角色只能查看但不能领取，前后端共同保障 VIP 客户的公海领取规则
 
 - [`frontend/src/pages/LoginPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/LoginPage.vue)
   - 登录页面，对应实施计划「阶段四 · 步骤 4.1」
@@ -148,6 +167,12 @@
   - 内部统一使用 `fetch` 与 `ApiResult<T>` 类型解析后端响应，在 `code != 200` 时抛出错误，交由页面层使用 Ant Design Vue 的 `message` 组件做反馈
   - 在公共请求方法中自动从本地存储读取 JWT，并在有令牌时为请求附加 `Authorization: Bearer <token>` 头
 
+- [`frontend/src/services/approval.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/services/approval.ts)
+  - 封装敏感操作审批相关接口：
+    - `fetchApprovalPage`：调用 `GET /api/approvals` 分页查询审批记录
+    - `createApproval`：调用 `POST /api/approvals` 提交删除 VIP 客户或跨部门客户转移的审批请求
+    - `decideApproval`：调用 `POST /api/approvals/{id}/decision` 提交审批结果（通过或拒绝）
+
 > 当前已在 `src` 下创建基础前端目录结构并完成员工列表、登录入口与基础角色权限展示：  
 > - `frontend/src/pages/`：页面组件目录，当前包含 `HomePage.vue`、`EmployeeListPage.vue`、`LoginPage.vue`、`ProfilePage.vue` 与 `SettingsPage.vue`  
 > - `frontend/src/components/`：通用组件与业务组件目录  
@@ -173,7 +198,7 @@
 - [`memory-bank/implement-plan.md`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/memory-bank/implement-plan.md)
   - 实施级开发计划
   - 将业务需求拆解为多个阶段和具体步骤，每一步都包含“任务 / 具体要求 / 验证测试”
-  - 当前我们已完成其中的「阶段一 · 步骤 1.1-1.3」「阶段二 · 步骤 2.1-2.2」「阶段三 · 步骤 3.1」「阶段四 · 步骤 4.1-4.2」以及「阶段五 · 步骤 5.1-5.2」
+  - 当前我们已完成其中的「阶段一 · 步骤 1.1-1.3」「阶段二 · 步骤 2.1-2.2」「阶段三 · 步骤 3.1」「阶段四 · 步骤 4.1-4.2」「阶段五 · 步骤 5.1-5.2」以及「阶段六 · 步骤 6.1」
 
 - [`memory-bank/progress.md`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/memory-bank/progress.md)
   - 按时间记录每次执行实施计划时所做的实际工作
@@ -189,6 +214,6 @@
 
 当前仓库已完成从工程骨架到首批核心功能的落地：
 
-- 后端具备可启动的 Spring Boot 应用、员工与客户基础管理能力、操作日志审计以及基于 Spring Security + JWT 的登录与角色权限控制
-- 前端具备可启动的 Vue 3 + Vite 应用、员工列表管理页面、登录与个人中心页面，并在路由与菜单层面按角色控制关键入口与操作按钮的展示
+- 后端具备可启动的 Spring Boot 应用、员工与客户基础管理能力、客户流转与公海池基础能力、操作日志审计、敏感操作审批以及基于 Spring Security + JWT 的登录与角色权限控制
+- 前端具备可启动的 Vue 3 + Vite 应用、员工列表管理页面、客户管理页面、公海客户页面、操作日志页面、敏感操作审批页面以及登录与个人中心页面，并在路由与菜单层面按角色控制关键入口与操作按钮的展示，同时在客户列表中支持客户分配、公海领取、流转记录查看与敏感操作审批发起
 - 架构与进度说明文档已经与代码状态同步，后续每完成一个实施步骤，应继续更新 `progress.md` 与本文件，保证“文档即架构”的一致性。
