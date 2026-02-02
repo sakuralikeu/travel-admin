@@ -31,6 +31,11 @@ const routes = [
     meta: { requiresAuth: true, roles: ["SUPERVISOR", "MANAGER", "SUPER_ADMIN"] }
   },
   {
+    path: "/trade-warnings",
+    component: () => import("./pages/TradeWarningPage.vue"),
+    meta: { requiresAuth: true, roles: ["SUPERVISOR", "MANAGER", "SUPER_ADMIN"] }
+  },
+  {
     path: "/approvals",
     component: () => import("./pages/ApprovalPage.vue"),
     meta: { requiresAuth: true, roles: ["SUPERVISOR", "MANAGER", "SUPER_ADMIN"] }

@@ -42,8 +42,8 @@
 > - `backend/src/main/java/com/travel/admin/controller/`：对外 REST 接口层（包含员工管理、客户管理、操作日志查询与认证接口），并通过 `@PreAuthorize` 基于角色做接口级访问控制  
 > - `backend/src/main/java/com/travel/admin/service/`：业务服务层（含 `impl` 实现），封装员工、客户、公海池与离职客户处理等具体业务逻辑  
 > - `backend/src/main/java/com/travel/admin/mapper/`：MyBatis-Plus Mapper 接口  
-> - `backend/src/main/java/com/travel/admin/entity/`：数据库实体（员工、客户、客户流转记录、操作日志等）  
-> - `backend/src/main/java/com/travel/admin/dto/`：请求/响应 DTO（含员工、客户、公海池操作、日志查询与登录请求/响应模型）  
+> - `backend/src/main/java/com/travel/admin/entity/`：数据库实体（员工、客户、客户流转记录、操作日志、异常交易预警等）  
+> - `backend/src/main/java/com/travel/admin/dto/`：请求/响应 DTO（含员工、客户、公海池操作、日志查询、异常交易预警与登录请求/响应模型）  
 > - `backend/src/main/resources/mapper/`：MyBatis XML 映射文件  
 
 ---
@@ -116,6 +116,12 @@
   - 使用 `a-table` 展示审批类型、客户 ID、原/目标员工 ID、申请人 ID、原因、状态、审批人 ID 与审批意见等字段
   - 仅对 `SUPERVISOR`、`MANAGER` 与 `SUPER_ADMIN` 角色在导航中展示入口，支持对待审批记录执行“通过”或“拒绝”操作
 
+- [`frontend/src/pages/TradeWarningPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/TradeWarningPage.vue)
+  - 异常交易预警页面，对应实施计划「阶段七 · 步骤 7.3」
+  - 展示价格异常、非公司账户收款、长期未收款等风险预警记录
+  - 提供多维度筛选（状态、等级、类型、员工、客户），支持按时间与风险类型快速定位问题订单
+  - 经理及以上角色可点击“扫描生成预警”手动触发全量扫描，主管及以上角色可对预警记录执行“关闭”操作并录入原因
+
 - [`frontend/src/pages/CustomerListPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/CustomerListPage.vue)
   - 客户管理列表页面，为已实现的客户 CRUD 与查询接口提供前端入口
   - 使用 `a-table` 展示姓名、手机号、微信、邮箱、客户等级、客户状态、旅游偏好、分配员工与最近跟进时间等字段
@@ -173,6 +179,12 @@
     - `createApproval`：调用 `POST /api/approvals` 提交删除 VIP 客户或跨部门客户转移的审批请求
     - `decideApproval`：调用 `POST /api/approvals/{id}/decision` 提交审批结果（通过或拒绝）
 
+- [`frontend/src/services/trade-warning.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/services/trade-warning.ts)
+  - 封装异常交易预警相关接口：
+    - `fetchTradeWarningPage`：调用 `GET /api/trade-warnings` 分页查询预警记录
+    - `scanTradeWarnings`：调用 `POST /api/trade-warnings/scan` 触发扫描
+    - `closeTradeWarning`：调用 `POST /api/trade-warnings/{id}/close` 关闭预警
+
 > 当前已在 `src` 下创建基础前端目录结构并完成员工列表、登录入口与基础角色权限展示：  
 > - `frontend/src/pages/`：页面组件目录，当前包含 `HomePage.vue`、`EmployeeListPage.vue`、`LoginPage.vue`、`ProfilePage.vue` 与 `SettingsPage.vue`  
 > - `frontend/src/components/`：通用组件与业务组件目录  
@@ -198,7 +210,7 @@
 - [`memory-bank/implement-plan.md`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/memory-bank/implement-plan.md)
   - 实施级开发计划
   - 将业务需求拆解为多个阶段和具体步骤，每一步都包含“任务 / 具体要求 / 验证测试”
-  - 当前我们已完成其中的「阶段一 · 步骤 1.1-1.3」「阶段二 · 步骤 2.1-2.2」「阶段三 · 步骤 3.1」「阶段四 · 步骤 4.1-4.2」「阶段五 · 步骤 5.1-5.2」以及「阶段六 · 步骤 6.1」
+  - 当前我们已完成其中的「阶段一 · 步骤 1.1-1.3」「阶段二 · 步骤 2.1-2.2」「阶段三 · 步骤 3.1」「阶段四 · 步骤 4.1-4.2」「阶段五 · 步骤 5.1-5.2」「阶段六 · 步骤 6.1-6.2」以及「阶段七 · 步骤 7.1-7.3」
 
 - [`memory-bank/progress.md`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/memory-bank/progress.md)
   - 按时间记录每次执行实施计划时所做的实际工作
@@ -214,6 +226,6 @@
 
 当前仓库已完成从工程骨架到首批核心功能的落地：
 
-- 后端具备可启动的 Spring Boot 应用、员工与客户基础管理能力、客户流转与公海池基础能力、操作日志审计、敏感操作审批以及基于 Spring Security + JWT 的登录与角色权限控制
-- 前端具备可启动的 Vue 3 + Vite 应用、员工列表管理页面、客户管理页面、公海客户页面、操作日志页面、敏感操作审批页面以及登录与个人中心页面，并在路由与菜单层面按角色控制关键入口与操作按钮的展示，同时在客户列表中支持客户分配、公海领取、流转记录查看与敏感操作审批发起
+- 后端具备可启动的 Spring Boot 应用、员工与客户基础管理能力、客户流转与公海池基础能力、操作日志审计、敏感操作审批、异常交易预警以及基于 Spring Security + JWT 的登录与角色权限控制
+- 前端具备可启动的 Vue 3 + Vite 应用、员工列表管理页面、客户管理页面、公海客户页面、操作日志页面、敏感操作审批页面、异常交易预警页面以及登录与个人中心页面，并在路由与菜单层面按角色控制关键入口与操作按钮的展示，同时在客户列表与预警列表中支持客户分配、公海领取、流转记录查看、敏感操作审批发起与风险预警处理
 - 架构与进度说明文档已经与代码状态同步，后续每完成一个实施步骤，应继续更新 `progress.md` 与本文件，保证“文档即架构”的一致性。

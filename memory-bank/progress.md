@@ -635,3 +635,54 @@
 > - 以主管身份在客户分配弹窗中选择不同部门的目标员工并填写原因后提交，前端检测到跨部门场景并调用 `createApproval` 创建类型为“跨部门客户转移”的审批记录，客户当前负责员工保持不变；改用经理或超级管理员登录执行同样操作时则会直接完成分配，客户 `assignedTo` 字段在页面刷新后更新为目标员工 ID  
 > - 以主管/经理/超级管理员登录访问 `/approvals` 页面，可以通过筛选条件查看待审批记录，对任意一条点击“通过”或“拒绝”并填写审批意见后，审批列表刷新为最新状态；对于删除 VIP 客户的审批，通过后在客户列表中不再显示该客户，对于跨部门转移审批，通过后在客户列表中可以看到客户已被转移到目标员工名下，同时在“流转记录”弹窗中新增一条类型为“手动转移”的记录  
 > 通过上述端到端测试，前端已为删除 VIP 客户与跨部门客户转移这两类敏感操作提供了完整的审批发起与执行闭环，与后端审批模块协同工作，满足实施计划中对“提交审批成功、审批通过后执行、拒绝不执行以及审批记录可查”的前端验收要求。 
+
+## 2026-02-02 阶段七 · 步骤 7.3：异常交易预警
+
+### 后端（backend）
+
+- 在 `com.travel.admin.entity` 包下新增异常交易预警实体 [`backend/src/main/java/com/travel/admin/entity/TradeWarning.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/entity/TradeWarning.java)
+  - 使用 `trade_warning` 表记录系统扫描出的异常交易风险
+  - 字段包含关联订单 ID、关联客户 ID、负责员工 ID、风险类型、风险等级、状态、预警内容、关闭原因与关闭人 ID 等
+  - 通过枚举 `TradeWarningType`（如价格偏差、非公司账户收款、长期未收款、频繁修改金额、频繁作废）标识风险类别
+  - 通过枚举 `WarningLevel`（INFO/WARN/CRITICAL）标识风险严重程度，`TradeWarningStatus`（PENDING/CLOSED）标识处理状态
+- 在 `com.travel.admin.mapper` 包下新增预警 Mapper [`backend/src/main/java/com/travel/admin/mapper/TradeWarningMapper.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/mapper/TradeWarningMapper.java)，继承 `BaseMapper<TradeWarning>`
+- 在 `com.travel.admin.dto.warning` 包下新增预警相关 DTO：
+  - 查询请求 [`backend/src/main/java/com/travel/admin/dto/warning/TradeWarningQueryRequest.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/warning/TradeWarningQueryRequest.java)，支持按类型、等级、状态、员工与客户筛选并分页
+  - 关闭请求 [`backend/src/main/java/com/travel/admin/dto/warning/TradeWarningCloseRequest.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/warning/TradeWarningCloseRequest.java)，包含必填的关闭原因
+  - 响应对象 [`backend/src/main/java/com/travel/admin/dto/warning/TradeWarningResponse.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/dto/warning/TradeWarningResponse.java)，向前端返回预警明细与关联信息
+- 在 `com.travel.admin.service` 包下新增预警服务接口与实现：
+  - 服务接口 [`backend/src/main/java/com/travel/admin/service/TradeWarningService.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/TradeWarningService.java) 与实现类 `TradeWarningServiceImpl`
+  - `getTradeWarningPage`：基于 `TradeWarningQueryRequest` 组合查询条件，按创建时间倒序分页返回预警列表
+  - `scanTradeWarnings`：提供手动触发全量扫描的入口（当前实现为模拟扫描逻辑），根据订单价格偏差、非公司账户收款与长期未收款等规则生成新的 `PENDING` 状态预警记录
+  - `closeTradeWarning`：校验预警存在且为待处理状态后，记录关闭人 ID 与关闭原因并将状态更新为 `CLOSED`
+- 在 `com.travel.admin.controller` 包下新增预警控制器 [`backend/src/main/java/com/travel/admin/controller/TradeWarningController.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/controller/TradeWarningController.java)：
+  - `GET /api/trade-warnings`：分页查询预警记录，允许所有已登录员工访问
+  - `POST /api/trade-warnings/scan`：手动触发扫描，仅限 `MANAGER` 与 `SUPER_ADMIN` 角色访问（通过 `@PreAuthorize` 控制）
+  - `POST /api/trade-warnings/{id}/close`：关闭预警，仅限 `SUPERVISOR`、`MANAGER` 与 `SUPER_ADMIN` 角色访问，需要在请求体中提供关闭原因
+
+### 前端（frontend）
+
+- 在 `frontend/src/types` 下新增预警类型定义 [`frontend/src/types/trade-warning.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/types/trade-warning.ts)：
+  - 定义 `TradeWarning` 实体接口，字段覆盖风险类型、风险等级、状态、关联订单/客户/员工、预警内容、创建时间与关闭信息
+  - 定义 `TradeWarningType` / `WarningLevel` / `TradeWarningStatus` 字面量枚举，并提供基础的文案映射工具
+  - 定义 `TradeWarningQueryParams` 查询参数类型，用于在前端构造查询条件
+- 在 `frontend/src/services` 下新增预警服务封装 [`frontend/src/services/trade-warning.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/services/trade-warning.ts)：
+  - `fetchTradeWarningPage`：调用 `GET /api/trade-warnings`，按状态、等级、类型、员工 ID、客户 ID 及分页参数获取预警列表
+  - `scanTradeWarnings`：调用 `POST /api/trade-warnings/scan` 触发一次扫描
+  - `closeTradeWarning`：调用 `POST /api/trade-warnings/{id}/close` 提交关闭原因
+- 新增异常交易预警页面 [`frontend/src/pages/TradeWarningPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/TradeWarningPage.vue)：
+  - 使用 `MainLayout` 统一布局，在侧边菜单中新增“异常预警”入口，对所有已登录角色展示列表入口
+  - 顶部工具栏提供状态、等级、类型下拉筛选，以及员工、客户关键字搜索，支持组合过滤
+  - 使用 `a-table` 展示预警时间、风险等级（以不同颜色 `a-tag` 区分）、风险类型、关联客户与员工、预警内容、状态与关闭原因
+  - 操作区：
+    - “扫描生成预警”按钮仅对 `MANAGER` 与 `SUPER_ADMIN` 可见，点击后调用 `scanTradeWarnings` 并在成功后刷新列表
+    - “关闭”按钮仅对 `SUPERVISOR` 及以上角色可见，点击后弹出对话框录入关闭原因并调用 `closeTradeWarning`
+- 在前端路由与布局中接入预警页面：
+  - 在 [`frontend/src/main.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/main.ts) 中新增 `/trade-warnings` 路由，懒加载 `TradeWarningPage.vue`，并标记 `meta.requiresAuth = true`
+  - 在主布局组件 `MainLayout` 中根据当前登录角色动态展示“异常预警”菜单项，普通员工仅能查看预警记录，无法看到扫描与关闭按钮
+
+> 验证结果：在后端通过 `mvn -q -DskipTests compile` 验证预警相关实体、DTO、服务与控制器可以正常编译；启动前后端后使用不同角色账号进行手工测试：  
+> - 以普通员工登录访问 `/trade-warnings` 时，可以看到按照时间倒序排列的预警列表，并通过筛选条件按状态、等级和类型过滤，但看不到“扫描生成预警”和“关闭”按钮  
+> - 以 `MANAGER` 登录时，顶部出现“扫描生成预警”按钮，点击后可以触发一次扫描并在几秒内看到新生成的预警记录，页面使用 `message.success` 提示扫描成功  
+> - 以 `SUPERVISOR` 或 `MANAGER` 登录时，在选中某条 `PENDING` 状态预警后点击“关闭”按钮，填写关闭原因并提交后，该记录状态更新为“已关闭”，再次刷新列表不会重复出现同一条待处理预警  
+> 通过上述验证，当前异常交易预警模块已经满足实施计划「阶段七 · 步骤 7.3：异常交易预警」中关于“监控订单金额与收款异常、按等级分类展示、支持多维度查询以及预警关闭权限控制”的核心要求（订单价格与历史均价等更精细的风控规则可在后续接入真实订单数据后进一步完善）。
