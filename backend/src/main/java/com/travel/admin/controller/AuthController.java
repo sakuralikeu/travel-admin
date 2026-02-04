@@ -1,5 +1,6 @@
 package com.travel.admin.controller;
 
+import com.travel.admin.common.annotation.RateLimit;
 import com.travel.admin.common.result.Result;
 import com.travel.admin.dto.auth.LoginRequest;
 import com.travel.admin.dto.auth.LoginResponse;
@@ -38,6 +39,7 @@ public class AuthController {
 
     @PostMapping("/login")
     @Operation(summary = "用户名密码登录")
+    @RateLimit(maxRequests = 10, windowSeconds = 60)
     public Result<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         try {
             Authentication authentication = authenticationManager.authenticate(

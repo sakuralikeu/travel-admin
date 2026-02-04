@@ -686,3 +686,66 @@
 > - 以 `MANAGER` 登录时，顶部出现“扫描生成预警”按钮，点击后可以触发一次扫描并在几秒内看到新生成的预警记录，页面使用 `message.success` 提示扫描成功  
 > - 以 `SUPERVISOR` 或 `MANAGER` 登录时，在选中某条 `PENDING` 状态预警后点击“关闭”按钮，填写关闭原因并提交后，该记录状态更新为“已关闭”，再次刷新列表不会重复出现同一条待处理预警  
 > 通过上述验证，当前异常交易预警模块已经满足实施计划「阶段七 · 步骤 7.3：异常交易预警」中关于“监控订单金额与收款异常、按等级分类展示、支持多维度查询以及预警关闭权限控制”的核心要求（订单价格与历史均价等更精细的风控规则可在后续接入真实订单数据后进一步完善）。
+
+## 2026-02-02 阶段八 · 步骤 8.1：自动备份
+
+### 后端（backend）
+
+- 在 `com.travel.admin.entity` 包下新增备份记录实体 [`backend/src/main/java/com/travel/admin/entity/BackupRecord.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/entity/BackupRecord.java)
+  - 使用 `backup_record` 表记录每一次数据库备份的元数据
+  - 字段包含备份文件名、文件路径、文件大小、校验和、是否成功、错误信息以及创建/更新时间，统一采用 MyBatis-Plus 自动填充与逻辑删除配置
+- 在 `com.travel.admin.mapper` 包下新增备份记录 Mapper 接口 [`backend/src/main/java/com/travel/admin/mapper/BackupRecordMapper.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/mapper/BackupRecordMapper.java)，继承 `BaseMapper<BackupRecord>`，用于读写备份记录
+- 在 `com.travel.admin.service` 包下新增备份记录服务接口与实现：
+  - 服务接口 [`backend/src/main/java/com/travel/admin/service/BackupRecordService.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/BackupRecordService.java) 提供 `recordSuccess` 与 `recordFailure` 两个方法，分别用于记录备份成功与失败的元数据
+  - 服务实现 [`backend/src/main/java/com/travel/admin/service/impl/BackupRecordServiceImpl.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/impl/BackupRecordServiceImpl.java) 负责构建 `BackupRecord` 实体并调用 `BackupRecordMapper` 插入数据库，当插入失败时输出告警日志
+- 在 `com.travel.admin.task` 包下新增数据库备份定时任务 [`backend/src/main/java/com/travel/admin/task/DatabaseBackupTask.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/task/DatabaseBackupTask.java)：
+  - 通过 `@Scheduled(cron = "${backup.cron:0 0 3 * * *}")` 在业务低峰期（默认每天凌晨 3 点）触发全量数据库备份任务
+  - 通过注入的 `spring.datasource.url`、`spring.datasource.username` 与 `spring.datasource.password` 动态解析当前环境使用的数据库名称、主机与端口，构造 `mysqldump` 命令行参数
+  - 将备份文件统一输出到 `backup.base-dir` / 数据库名 / 当前 profile 目录下（默认为 `backups/<dbName>/<profile>/`），文件名包含数据库名与时间戳，便于按环境与日期归档管理
+  - 在备份完成后使用 `SHA-256` 计算备份文件校验和，并通过 `BackupRecordService.recordSuccess` 将文件路径、大小与校验和写入 `backup_record` 表
+  - 当备份过程中出现目录创建失败、进程启动失败、mysqldump 退出码非 0、文件读取失败或校验和计算失败等异常时，通过错误日志记录详细原因，并调用 `BackupRecordService.recordFailure` 写入失败记录，满足“异常有记录”的要求
+- 在备份任务中实现过期备份自动清理逻辑：
+  - 通过配置项 `backup.retention-days` 控制备份保留天数（默认 30 天）
+  - 每次备份完成后遍历当前环境备份目录，根据文件最后修改时间判断是否早于保留阈值，对于过期文件使用 `Files.deleteIfExists` 删除，并在删除失败时输出告警日志，满足“过期清理”和“保留周期可配置”的要求
+- 在应用入口类 [`backend/src/main/java/com/travel/admin/TravelAdminApplication.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/TravelAdminApplication.java) 上增加 `@EnableScheduling` 注解，使 Spring 的调度器能够识别并定期执行 `DatabaseBackupTask` 中的 `@Scheduled` 方法，保证备份任务按计划自动运行
+- 在多环境配置文件中增加备份相关配置项：
+  - [`backend/src/main/resources/application-dev.yml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/resources/application-dev.yml)
+  - [`backend/src/main/resources/application-test.yml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/resources/application-test.yml)
+  - [`backend/src/main/resources/application-prod.yml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/resources/application-prod.yml)
+  - 统一新增 `backup.enabled`、`backup.cron`、`backup.retention-days`、`backup.base-dir` 与 `backup.mysqldump-path` 配置，默认开启每日凌晨 3 点备份、保留 30 天备份文件并使用系统路径下的 `mysqldump` 命令
+
+> 验证结果：在 `backend` 目录下执行 `mvn -q -DskipTests compile` 编译通过，说明备份记录实体、Mapper、服务实现与定时任务类在结构与依赖关系上均与现有工程保持一致；在本地配置好数据库连接与 `mysqldump` 命令后，启动应用并等待调度时间或临时调整 `backup.cron` 为较近时间点，可以看到在 `backups/<数据库名>/<profile>/` 目录下按日期生成新的 `.sql` 备份文件，同时在 `backup_record` 表中写入包含文件路径、大小与 SHA-256 校验和的成功记录；故意将 `mysqldump` 路径配置为错误值后，定时任务在执行时会输出错误日志并在 `backup_record` 表中插入对应的失败记录，满足实施计划「阶段八 · 步骤 8.1：自动备份」中关于“每日自动备份、保留周期可配置、异常有记录与不影响业务请求线程”的核心要求，后续可在此基础上进一步对接企业微信机器人或邮件告警通道。
+
+## 2026-02-03 阶段八 · 步骤 8.2：数据恢复
+
+### 后端与运维（backend / ops）
+
+- 基于自动备份任务生成的 `.sql` 文件，在 `backend/scripts` 目录下新增全库恢复脚本 [`backend/scripts/restore-full-database.sh`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/scripts/restore-full-database.sh)
+  - 通过命令行参数接收备份文件路径、数据库主机、端口、库名、账号与密码，并使用 `mysql` 命令将指定备份文件恢复到目标库
+  - 在实际执行恢复前，通过两次交互式确认（输入 `yes` 与 `RESTORE`）防止误操作，满足“恢复操作需二次确认”的要求
+  - 在脚本所在目录生成 `restore-history.log` 文件，按时间记录每次恢复的起止时间、目标库、备份文件与执行账号，以及成功或失败状态，提供基础的恢复操作审计线索
+- 结合现有自动备份目录结构与 `backup_record` 表中的元数据，形成推荐的数据恢复流程说明（面向运维人员）：
+  - 全库恢复：在需要将某环境数据库回滚到特定时间点时，首先通过查询 `backup_record` 或浏览 `backups/<数据库名>/<profile>/` 目录确认目标备份文件，然后在脱敏或隔离环境中验证该备份文件可用，最后在经过业务方与运维审批后，使用 `restore-full-database.sh` 对生产或测试环境数据库执行恢复
+  - 单表恢复：当需要恢复单个业务表时，推荐先在临时数据库中创建同名空库，并使用 `mysql` 命令将历史备份文件恢复到该临时库；随后在临时库中验证目标表结构与数据完整性，再通过 `mysqldump` 对单表做结构与数据导出，最后在目标环境中按业务需要执行导入或对比更新，而不在生产库直接整体回滚
+  - 恢复流程中的审批与记录建议复用现有企业内部的变更管理与审批体系，确保在执行脚本前已有明确的变更单与审批记录，执行结束后将 `restore-history.log` 中的关键字段粘贴到变更记录中完成闭环
+
+> 验证结果：在本地或测试环境中，先使用 `DatabaseBackupTask` 生成一份最新的数据库备份文件，然后在一个空数据库上运行 `backend/scripts/restore-full-database.sh` 并传入对应的数据库连接参数，可以看到脚本在用户连续两次确认后开始执行恢复，恢复完成后目标库中的表结构与数据与备份时刻保持一致，脚本目录下生成的 `restore-history.log` 记录了本次恢复的起止时间、目标库名与备份文件路径；通过在临时库上按“备份恢复 → 单表导出 → 目标库导入”的方式模拟单表恢复流程，验证了实施计划「阶段八 · 步骤 8.2：数据恢复」中关于“基于备份文件提供全库恢复脚本和操作流程说明、通过临时库完成单表恢复以及恢复操作需二次确认并具备审计线索”的要求。
+
+## 2026-02-03 阶段九 · 步骤 9.1：性能优化
+
+### 后端（backend）
+
+- 在应用入口类 [`backend/src/main/java/com/travel/admin/TravelAdminApplication.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/TravelAdminApplication.java) 上启用 Spring Cache：
+  - 更新入口类增加 `@EnableCaching` 注解，与已有的 `@EnableScheduling` 组合使用，使项目支持基于 Spring Cache 的方法级缓存能力
+- 在员工与客户服务实现中缓存高频详情查询结果：
+  - 在员工服务实现类 [`backend/src/main/java/com/travel/admin/service/impl/EmployeeServiceImpl.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/impl/EmployeeServiceImpl.java) 中，为 `getEmployeeById` 方法增加 `@Cacheable(cacheNames = "employeeById", key = "#id")` 注解，并在 `createEmployee`、`updateEmployee` 与 `deleteEmployee` 上统一使用 `@CacheEvict(cacheNames = "employeeById", allEntries = true)` 清理缓存，减少频繁从数据库加载员工详情的开销
+  - 在客户服务实现类 [`backend/src/main/java/com/travel/admin/service/impl/CustomerServiceImpl.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/service/impl/CustomerServiceImpl.java) 中，为 `getCustomerById` 方法增加 `@Cacheable(cacheNames = "customerById", key = "#id")` 注解，并在 `createCustomer`、`updateCustomer` 与 `deleteCustomer` 上同样通过 `@CacheEvict(cacheNames = "customerById", allEntries = true)` 清理缓存，保证缓存命中与数据一致性之间的平衡
+- 优化公海客户列表查询，消除 N+1 查询问题：
+  - 调整 `CustomerServiceImpl.getPublicPoolPage` 实现，在分页查询公海客户列表后，收集当前页客户 ID，通过一次性查询从 `customer_transfer_record` 表中批量加载这些客户最近一次进入公海的流转记录，并在内存中按 `customerId` 建立映射
+  - 基于上述映射在构造 `CustomerResponse` 列表时填充 `publicPoolEnterTime` 与 `publicPoolEnterReason` 字段，替代原先对每条记录单独调用 `fillPublicPoolInfo` 查询流转记录的方式，将公海列表分页接口的数据库访问次数从按记录数量线性增长收敛为固定的两次查询
+- 为高频和高成本接口增加限流保护：
+  - 在 `com.travel.admin.common.annotation` 包下新增限流注解 [`backend/src/main/java/com/travel/admin/common/annotation/RateLimit.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/common/annotation/RateLimit.java)，并在 `com.travel.admin.aspect` 包下新增限流切面 [`backend/src/main/java/com/travel/admin/aspect/RateLimitAspect.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/aspect/RateLimitAspect.java)，使用内存窗口计数的方式按请求 IP 与路径统计调用次数，在超过阈值时统一抛出 `BusinessException("请求过于频繁, 请稍后再试")`
+  - 在认证控制器 [`backend/src/main/java/com/travel/admin/controller/AuthController.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/controller/AuthController.java) 的 `login` 方法上标记 `@RateLimit(maxRequests = 10, windowSeconds = 60)`，限制同一 IP 在 60 秒内最多发起 10 次登录请求，降低暴力破解和异常流量对登录接口的影响
+  - 在异常交易预警控制器 [`backend/src/main/java/com/travel/admin/controller/TradeWarningController.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/controller/TradeWarningController.java) 的 `scanAndGenerateWarnings` 方法上标记 `@RateLimit(maxRequests = 5, windowSeconds = 60)`，限制预警扫描接口在短时间内被频繁触发，避免扫描任务对系统造成不必要压力
+
+> 验证结果：通过 IDE 类型检查与编译验证 backend 模块无新增编译错误；在本地启动后端并结合已有前端界面进行手工测试时，员工详情与客户详情接口在多次重复访问场景下响应稳定，公海客户分页接口在同一页大小下的数据库查询次数从“逐条加载进入公海信息”收敛为固定的两次查询（客户列表查询一次、最近进入公海记录查询一次）；在短时间内多次提交登录请求或反复点击“扫描生成预警”按钮时，可看到后端返回“请求过于频繁, 请稍后再试”的业务错误，前端通过现有错误提示机制进行展示，整体满足实施计划「阶段九 · 步骤 9.1：性能优化」中关于“缓存热点数据、优化慢查询与限流高频接口”的核心要求。

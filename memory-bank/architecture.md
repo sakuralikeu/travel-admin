@@ -26,7 +26,7 @@
 - [`backend/src/main/java/com/travel/admin/TravelAdminApplication.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/TravelAdminApplication.java)
   - 后端应用入口类
   - 标记 `@SpringBootApplication`，负责启动 Spring 容器
-  - 将来所有接口、业务逻辑、数据访问类都位于 `com.travel.admin` 包层级下
+  - 组合使用 `@EnableScheduling` 与 `@EnableCaching`，分别启用定时任务与 Spring Cache 缓存能力，将来所有接口、业务逻辑、数据访问类都位于 `com.travel.admin` 包层级下
 
 - [`backend/src/main/resources/application.yml`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/resources/application.yml)
   - Spring Boot 默认配置文件
@@ -36,13 +36,17 @@
 > 当前已在 `com.travel.admin` 包下创建并落地以下公共与业务模块：  
 > - `backend/src/main/java/com/travel/admin/common/result/`：统一响应结果封装  
 > - `backend/src/main/java/com/travel/admin/common/exception/`：业务异常与全局异常处理  
-> - `backend/src/main/java/com/travel/admin/config/`：MyBatis-Plus 分页与自动填充配置、Spring Security 与方法级权限配置  
+> - `backend/src/main/java/com/travel/admin/common/annotation/`：自定义注解，包括操作日志注解与接口限流注解  
+> - `backend/src/main/java/com/travel/admin/config/`：MyBatis-Plus 分页与自动填充配置、Spring Security 与方法级权限配置以及默认管理员初始化  
 > - `backend/src/main/java/com/travel/admin/security/`：JWT 工具类、自定义用户详情服务与认证过滤器，实现基于令牌的无状态登录  
+> - `backend/src/main/java/com/travel/admin/aspect/`：基于 AOP 的操作日志切面与限流切面，实现统一审计与高频接口限流  
+> - `backend/src/main/java/com/travel/admin/task/`：定时任务组件，用于在业务低峰期执行数据库自动备份并清理过期备份文件  
+> - `backend/scripts/restore-full-database.sh`：基于 `mysqldump` 备份文件执行全库恢复的运维脚本，包含命令行二次确认与恢复历史本地日志记录  
 > 后续及当前业务功能按以下分层创建 controller / service / mapper / entity 等模块：  
 > - `backend/src/main/java/com/travel/admin/controller/`：对外 REST 接口层（包含员工管理、客户管理、操作日志查询与认证接口），并通过 `@PreAuthorize` 基于角色做接口级访问控制  
-> - `backend/src/main/java/com/travel/admin/service/`：业务服务层（含 `impl` 实现），封装员工、客户、公海池与离职客户处理等具体业务逻辑  
+> - `backend/src/main/java/com/travel/admin/service/`：业务服务层（含 `impl` 实现），封装员工、客户、公海池与离职客户处理、审批流、异常预警与备份记录等具体业务逻辑  
 > - `backend/src/main/java/com/travel/admin/mapper/`：MyBatis-Plus Mapper 接口  
-> - `backend/src/main/java/com/travel/admin/entity/`：数据库实体（员工、客户、客户流转记录、操作日志、异常交易预警等）  
+> - `backend/src/main/java/com/travel/admin/entity/`：数据库实体（员工、客户、客户流转记录、操作日志、异常交易预警、备份记录等）  
 > - `backend/src/main/java/com/travel/admin/dto/`：请求/响应 DTO（含员工、客户、公海池操作、日志查询、异常交易预警与登录请求/响应模型）  
 > - `backend/src/main/resources/mapper/`：MyBatis XML 映射文件  
 
@@ -210,7 +214,7 @@
 - [`memory-bank/implement-plan.md`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/memory-bank/implement-plan.md)
   - 实施级开发计划
   - 将业务需求拆解为多个阶段和具体步骤，每一步都包含“任务 / 具体要求 / 验证测试”
-  - 当前我们已完成其中的「阶段一 · 步骤 1.1-1.3」「阶段二 · 步骤 2.1-2.2」「阶段三 · 步骤 3.1」「阶段四 · 步骤 4.1-4.2」「阶段五 · 步骤 5.1-5.2」「阶段六 · 步骤 6.1-6.2」以及「阶段七 · 步骤 7.1-7.3」
+  - 当前我们已完成其中的「阶段一 · 步骤 1.1-1.3」「阶段二 · 步骤 2.1-2.2」「阶段三 · 步骤 3.1」「阶段四 · 步骤 4.1-4.2」「阶段五 · 步骤 5.1-5.2」「阶段六 · 步骤 6.1-6.2」「阶段七 · 步骤 7.1-7.3」「阶段八 · 步骤 8.1-8.2」以及「阶段九 · 步骤 9.1」
 
 - [`memory-bank/progress.md`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/memory-bank/progress.md)
   - 按时间记录每次执行实施计划时所做的实际工作
@@ -226,6 +230,6 @@
 
 当前仓库已完成从工程骨架到首批核心功能的落地：
 
-- 后端具备可启动的 Spring Boot 应用、员工与客户基础管理能力、客户流转与公海池基础能力、操作日志审计、敏感操作审批、异常交易预警以及基于 Spring Security + JWT 的登录与角色权限控制
+- 后端具备可启动的 Spring Boot 应用、员工与客户基础管理能力、客户流转与公海池基础能力、操作日志审计、敏感操作审批、异常交易预警、定时数据库自动备份、基于 `mysqldump` 备份文件的全库恢复脚本以及基于 Spring Security + JWT 的登录与角色权限控制，并通过 Spring Cache 与限流切面完成了首轮性能优化
 - 前端具备可启动的 Vue 3 + Vite 应用、员工列表管理页面、客户管理页面、公海客户页面、操作日志页面、敏感操作审批页面、异常交易预警页面以及登录与个人中心页面，并在路由与菜单层面按角色控制关键入口与操作按钮的展示，同时在客户列表与预警列表中支持客户分配、公海领取、流转记录查看、敏感操作审批发起与风险预警处理
 - 架构与进度说明文档已经与代码状态同步，后续每完成一个实施步骤，应继续更新 `progress.md` 与本文件，保证“文档即架构”的一致性。

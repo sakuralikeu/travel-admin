@@ -1,6 +1,7 @@
 package com.travel.admin.controller;
 
 import com.travel.admin.common.annotation.LogOperation;
+import com.travel.admin.common.annotation.RateLimit;
 import com.travel.admin.common.enums.OperationType;
 import com.travel.admin.common.result.PageResult;
 import com.travel.admin.common.result.Result;
@@ -41,6 +42,7 @@ public class TradeWarningController {
     @Operation(summary = "扫描订单生成异常交易预警")
     @LogOperation(module = "TRADE_WARNING", name = "扫描生成异常交易预警", type = OperationType.CREATE)
     @PreAuthorize("hasAnyRole('MANAGER','SUPER_ADMIN')")
+    @RateLimit(maxRequests = 5, windowSeconds = 60)
     public Result<Void> scanAndGenerateWarnings() {
         tradeWarningService.scanAndGenerateWarnings();
         return Result.success();

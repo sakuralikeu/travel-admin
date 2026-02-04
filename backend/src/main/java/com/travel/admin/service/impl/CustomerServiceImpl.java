@@ -2,7 +2,9 @@ package com.travel.admin.service.impl;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -33,6 +35,8 @@ import com.travel.admin.service.CustomerService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -55,6 +59,7 @@ public class CustomerServiceImpl implements CustomerService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(cacheNames = "customerById", allEntries = true)
     public CustomerResponse createCustomer(CustomerCreateRequest request) {
         LambdaQueryWrapper<Customer> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Customer::getPhone, request.getPhone());
@@ -77,6 +82,7 @@ public class CustomerServiceImpl implements CustomerService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(cacheNames = "customerById", allEntries = true)
     public CustomerResponse updateCustomer(Long id, CustomerUpdateRequest request) {
         Customer customer = customerMapper.selectById(id);
         if (customer == null) {
@@ -102,6 +108,7 @@ public class CustomerServiceImpl implements CustomerService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(cacheNames = "customerById", allEntries = true)
     public void deleteCustomer(Long id) {
         Customer customer = customerMapper.selectById(id);
         if (customer == null) {
@@ -123,6 +130,7 @@ public class CustomerServiceImpl implements CustomerService {
     }
 
     @Override
+    @Cacheable(cacheNames = "customerById", key = "#id")
     public CustomerResponse getCustomerById(Long id) {
         Customer customer = customerMapper.selectById(id);
         if (customer == null) {
@@ -153,7 +161,54 @@ public class CustomerServiceImpl implements CustomerService {
         wrapper.isNull(Customer::getAssignedTo);
         wrapper.orderByAsc(Customer::getLastFollowUpTime);
         Page<Customer> resultPage = customerMapper.selectPage(page, wrapper);
-        return buildCustomerPageResult(resultPage);
+        if (resultPage.getRecords().isEmpty()) {
+            Page<CustomerResponse> emptyPage = new Page<>();
+            BeanUtils.copyProperties(resultPage, emptyPage);
+            emptyPage.setRecords(List.of());
+            return PageResult.of(emptyPage);
+        }
+        List<Customer> customers = resultPage.getRecords();
+        List<Long> customerIds = customers.stream()
+                .map(Customer::getId)
+                .collect(Collectors.toList());
+        LambdaQueryWrapper<CustomerTransferRecord> recordWrapper = new LambdaQueryWrapper<>();
+        recordWrapper.in(CustomerTransferRecord::getCustomerId, customerIds)
+                .in(CustomerTransferRecord::getType,
+                        CustomerTransferType.AUTO_RECYCLE_TO_POOL,
+                        CustomerTransferType.EMPLOYEE_RESIGN_TO_POOL)
+                .orderByDesc(CustomerTransferRecord::getCreatedAt);
+        List<CustomerTransferRecord> records = customerTransferRecordMapper.selectList(recordWrapper);
+        Map<Long, CustomerTransferRecord> latestRecordMap = new HashMap<>();
+        for (CustomerTransferRecord record : records) {
+            Long customerId = record.getCustomerId();
+            if (!latestRecordMap.containsKey(customerId)) {
+                latestRecordMap.put(customerId, record);
+            }
+        }
+        List<CustomerResponse> responses = customers.stream()
+                .map(customer -> {
+                    CustomerResponse response = new CustomerResponse();
+                    BeanUtils.copyProperties(customer, response);
+                    if (customer.getStatus() == CustomerStatus.PUBLIC_POOL) {
+                        CustomerTransferRecord record = latestRecordMap.get(customer.getId());
+                        if (record != null) {
+                            response.setPublicPoolEnterTime(record.getCreatedAt());
+                            if (record.getReason() != null && !record.getReason().isEmpty()) {
+                                response.setPublicPoolEnterReason(record.getReason());
+                            } else if (record.getType() == CustomerTransferType.AUTO_RECYCLE_TO_POOL) {
+                                response.setPublicPoolEnterReason("超过30天未跟进自动回收");
+                            } else if (record.getType() == CustomerTransferType.EMPLOYEE_RESIGN_TO_POOL) {
+                                response.setPublicPoolEnterReason("离职员工客户转入公海");
+                            }
+                        }
+                    }
+                    return response;
+                })
+                .collect(Collectors.toList());
+        Page<CustomerResponse> responsePage = new Page<>();
+        BeanUtils.copyProperties(resultPage, responsePage);
+        responsePage.setRecords(responses);
+        return PageResult.of(responsePage);
     }
 
     @Override

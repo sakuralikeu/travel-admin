@@ -19,9 +19,11 @@ import com.travel.admin.service.EmployeeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 @Service
 @RequiredArgsConstructor
@@ -31,6 +33,7 @@ public class EmployeeServiceImpl implements EmployeeService {
     private final EmployeeMapper employeeMapper;
 
     @Override
+    @CacheEvict(cacheNames = "employeeById", allEntries = true)
     public EmployeeResponse createEmployee(EmployeeCreateRequest request) {
         LambdaQueryWrapper<Employee> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Employee::getUsername, request.getUsername())
@@ -55,6 +58,7 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     @Override
+    @CacheEvict(cacheNames = "employeeById", allEntries = true)
     public EmployeeResponse updateEmployee(Long id, EmployeeUpdateRequest request) {
         Employee employee = employeeMapper.selectById(id);
         if (employee == null) {
@@ -91,6 +95,7 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     @Override
+    @CacheEvict(cacheNames = "employeeById", allEntries = true)
     public void deleteEmployee(Long id) {
         int affected = employeeMapper.deleteById(id);
         if (affected == 0) {
@@ -100,6 +105,7 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     @Override
+    @Cacheable(cacheNames = "employeeById", key = "#id")
     public EmployeeResponse getEmployeeById(Long id) {
         Employee employee = employeeMapper.selectById(id);
         if (employee == null) {
@@ -152,4 +158,3 @@ public class EmployeeServiceImpl implements EmployeeService {
         return encoder.encode(rawPassword);
     }
 }
-

@@ -22,3 +22,10 @@ trade-warning:
   company-payment-account: COMPANY_ACCOUNT
   max-amount-change-count: 3
   max-cancel-count: 3
+
+backup:
+  enabled: true
+  cron: "0 0 3 * * *"
+  retention-days: 30
+  base-dir: backups
+  mysqldump-path: mysqldump

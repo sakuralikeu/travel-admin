@@ -1,14 +1,16 @@
 <template>
   <a-layout style="min-height: 100vh">
-    <a-layout-sider v-model:collapsed="collapsed" collapsible>
-      <div class="logo">
-        员工客户管理系统
+    <a-layout-sider v-model:collapsed="collapsed" collapsible :collapsed-width="80">
+      <div class="logo" :class="{ collapsed: collapsed }">
+        <span v-if="!collapsed">员工客户管理系统</span>
+        <span v-else class="logo-short">员工管理</span>
       </div>
       <a-menu
         theme="dark"
         mode="inline"
         :selected-keys="[selectedKey]"
         @click="handleMenuClick"
+        :inline-collapsed="collapsed"
       >
         <a-menu-item key="home">
           首页
@@ -203,6 +205,15 @@ function handleLogout() {
   font-size: 16px;
   display: flex;
   align-items: center;
+}
+
+.logo.collapsed {
+  justify-content: center;
+}
+
+.logo-short {
+  white-space: nowrap;
+  font-size: 14px;
 }
 
 .header {
