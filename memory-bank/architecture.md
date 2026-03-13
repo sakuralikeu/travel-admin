@@ -98,9 +98,9 @@
   - 当前仅渲染 `router-view`，作为布局与页面切换的根容器
 
 - [`frontend/src/pages/HomePage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/HomePage.vue)
-  - 简单的首页页面
-  - 使用 Ant Design Vue 的 `Layout` 和 `Typography` 组件
-  - 顶部导航根据当前登录员工角色动态展示“员工管理”和“设置”等菜单项，普通员工仅看到首页和个人中心入口
+  - 系统首页仪表盘
+  - 汇总展示员工总数、客户总数、公海客户数、未关闭异常预警数与待审批事项数量，并提供快捷跳转入口
+  - 对具有审批或风控权限的角色额外展示“待审批事项”和“最近异常交易预警”列表，便于从首页快速处理关键任务
 
 - [`frontend/src/pages/EmployeeListPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/EmployeeListPage.vue)
   - 员工管理列表页面，对应实施计划「阶段三 · 步骤 3.1」
@@ -152,7 +152,8 @@
   - 顶部导航同样基于当前角色控制“员工管理”菜单的显隐
 
 - [`frontend/src/pages/SettingsPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/SettingsPage.vue)
-  - 系统设置占位页面，将来用于配置密码策略、登录安全策略等系统级参数
+  - 系统设置页面，提供密码策略（最小长度、复杂度要求）与登录安全（空闲超时、失败锁定阈值与锁定时长）配置表单
+  - 设置当前保存在浏览器本地存储中，可作为后续对接后端统一配置中心的前端入口
   - 仅在顶部导航和路由层对 `SUPER_ADMIN` 角色开放访问入口
 
  - [`frontend/src/types/index.ts`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/types/index.ts)

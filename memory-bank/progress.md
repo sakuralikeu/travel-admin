@@ -749,3 +749,19 @@
   - 在异常交易预警控制器 [`backend/src/main/java/com/travel/admin/controller/TradeWarningController.java`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/backend/src/main/java/com/travel/admin/controller/TradeWarningController.java) 的 `scanAndGenerateWarnings` 方法上标记 `@RateLimit(maxRequests = 5, windowSeconds = 60)`，限制预警扫描接口在短时间内被频繁触发，避免扫描任务对系统造成不必要压力
 
 > 验证结果：通过 IDE 类型检查与编译验证 backend 模块无新增编译错误；在本地启动后端并结合已有前端界面进行手工测试时，员工详情与客户详情接口在多次重复访问场景下响应稳定，公海客户分页接口在同一页大小下的数据库查询次数从“逐条加载进入公海信息”收敛为固定的两次查询（客户列表查询一次、最近进入公海记录查询一次）；在短时间内多次提交登录请求或反复点击“扫描生成预警”按钮时，可看到后端返回“请求过于频繁, 请稍后再试”的业务错误，前端通过现有错误提示机制进行展示，整体满足实施计划「阶段九 · 步骤 9.1：性能优化」中关于“缓存热点数据、优化慢查询与限流高频接口”的核心要求。
+
+## 2026-02-04 首页仪表盘与系统设置页面完善
+
+### 前端（frontend）
+
+- 更新首页页面 [`frontend/src/pages/HomePage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/HomePage.vue)：
+  - 使用 `MainLayout` 结合 Ant Design Vue 的栅格、卡片和统计组件构建首页仪表盘
+  - 调用 `fetchCustomerPage`、`fetchPublicPoolPage`、`fetchEmployeePage`、`fetchTradeWarningPage` 与 `fetchApprovalPage` 聚合客户总数、公海客户数、员工总数、未关闭异常预警数和待审批数量，并在卡片中展示
+  - 对具备审批或风控权限的角色，在首页额外展示“待审批事项”和“最近异常交易预警”两块精简列表，支持从首页一键跳转到 `/approvals` 与 `/trade-warnings` 处理任务
+
+- 完善系统设置页面 [`frontend/src/pages/SettingsPage.vue`](file:///e:/Users/Fengye/Documents/软开/origin-code/travel_admin/frontend/src/pages/SettingsPage.vue)：
+  - 引入“密码策略”和“登录安全”两个设置分组，支持配置最小密码长度、密码复杂度要求、空闲自动退出时间、连续登录失败锁定阈值和锁定时长等参数
+  - 使用 `localStorage` 以 `travel_admin_system_settings` 作为键持久化系统设置，页面加载时自动回填已有配置，并提供“恢复默认值”操作便于快速重置
+  - 保持原有路由和菜单权限策略不变，仅 `SUPER_ADMIN` 角色可以访问系统设置页面，其它角色看不到该入口
+
+> 验证结果：在本地启动前端后分别以普通员工、主管和超级管理员登录验证：普通员工在首页只看到与自身权限匹配的客户与公海统计信息，不会触发审批和异常预警接口；具有审批或风控权限的角色可以在首页看到待审批和异常预警概览，并通过卡片上的按钮跳转到对应列表完成处理；以 `SUPER_ADMIN` 身份进入系统设置页面修改密码策略与登录安全配置后刷新页面，设置仍能从本地存储正确回填，其它角色无法直接访问该页面，行为与 `architecture.md` 中的架构说明保持一致。
